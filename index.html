@@ -263,7 +263,7 @@ label > .zeile { grid-template-columns: 1fr 6.5rem; }
 <div id="toast" role="status" hidden></div>
 <script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});</script>
 <noscript>Der Betreuungsplaner braucht JavaScript.</noscript>
-<!-- Build 14.11.2026 10:02 -->
+<!-- Build 14.11.2026 10:12 -->
 <script>
 const __m = {}; const __f = {};
 function __r(id) { if (!(id in __m)) __m[id] = __f[id](); return __m[id]; }
@@ -2172,27 +2172,34 @@ function download(dateiname, inhalt, typ) {
 return { NAME, MONATE, ARTEN_TEXT, STATUS_TEXT, esc, wt, wtLang, datumDE, kurzDatumDE, uhr, datumUhrDE, wtDatumUhr, monatsname, zahl, mitVorzeichen, prozent, saldoText, ostersonntag, feiertage, monatsTage, download };
 };
 __f['app/rhythmus.js'] = function () {
-// Rhythmus-Assistent: prüft, ob ein einmaliger Rhythmuswechsel (Phasenverschiebung um einen Abschnitt, also
-// "Lotte bleibt eine Woche länger, danach läuft der Rhythmus andersherum") den Plan verbessert.
-// Technisch ist das eine normale Regeländerung von rhythmus.referenzBei mit Stichtag; hier wird sie nur durchgerechnet und bewertet.
-// Reine Funktionen, keine Speicherzugriffe.
+// Rhythmus-Assistent: Ausgleichswoche als Rhythmuswechsel nutzen, wenn dadurch Weihnachten/Neujahr aufgeht.
+//
+// Hintergrund: Frühjahr und Herbst gehören je nach Sommerrotation einem festen Elternteil. Fällt die Ferienwoche laut
+// Rhythmus dem anderen zu, bekommt dieser die Folgewoche als Ausgleich (Werktagstausch, Regel 4). Statt dieses
+// Ausgleichs kann der Rhythmus am Freitag der Ferienwoche umgedreht werden (gerade <-> ungerade): Der Benachteiligte
+// bekommt ab Freitag 15:00 eine volle Woche, danach läuft der Rhythmus andersherum. Das lohnt nur, wenn dadurch
+// die letzte Woche des Jahres und die erste des Folgejahres (Weihnachten/Neujahr) ohne Doppelwoche aufgehen.
+// Geht Weihnachten ohnehin auf, gibt es keinen Vorschlag.
+//
+// Technisch ist der Wechsel eine normale Regeländerung von rhythmus.referenzBei mit Stichtag. Reine Funktionen.
 
 const Z = __r('engine/zeit.js');
 const { berechnePlan, betreuungsjahre, bilanz, anderer, ersterSchultag, ferienAbgedecktBis } = __r('engine/engine.js');
 
 /** Zulässige Abweichung der Nächte vom Mittel je Betreuungsjahr ("184 ± 2" bei 364 Nächten), mindestens der heutige Stand. */
 const TOLERANZ_NAECHTE = 2;
-/** Ein Block ab dieser Länge am Stück beim selben Elternteil gilt als "Doppelwoche". */
+/** Ein Block über so viele Tage am Stück beim selben Elternteil gilt als Doppelwoche. */
 const LANG_TAGE = 10;
 
 const TAG = Z.MINUTEN_PRO_TAG;
+const FERIEN_NAME = { fruehjahr: 'Frühjahr', herbst: 'Herbst' };
 
 function schulbeginnTag(f) {
   return f.schulbeginn ? Z.tag(Z.parse(f.schulbeginn)) : ersterSchultag(f.letzter);
 }
 
-/** Zusammenhängende Betreuungsblöcke (gleicher Elternteil lückenlos), nur nach `ab`. */
-function bloecke(intervalle, ab = -Infinity) {
+/** Zusammenhängende Betreuungsblöcke (gleicher Elternteil lückenlos). */
+function bloecke(intervalle) {
   const out = [];
   for (const iv of intervalle) {
     if (iv.vorlaeufig) continue;
@@ -2200,110 +2207,104 @@ function bloecke(intervalle, ab = -Infinity) {
     if (l && l.bei === iv.bei && l.bis === iv.von) l.bis = iv.bis;
     else out.push({ von: iv.von, bis: iv.bis, bei: iv.bei });
   }
-  return out.filter((b) => b.bis > ab);
+  return out;
 }
 
-/** Kennzahlen eines Plans: Nächte je Betreuungsjahr und lange Blöcke ab `ab`. */
-function messen(plan, jahre, ab, bereiche) {
-  const iv = plan._intern.intervalle;
-  const je = jahre.map((j) => {
-    const n = bilanz(iv, Z.parse(j.von), Z.parse(j.bis)).naechte;
-    return { jahr: j.jahr, papa: n.papa, mama: n.mama, abw: Math.abs(n.papa - n.mama) / 2 };
-  });
-  // Sommer ist wegen Hortwoche und Sonderbetreuung ohnehin lang und zählt nicht; Blöcke über Weihnachten/Neujahr werden markiert.
-  const lang = bloecke(iv, ab)
-    .filter((b) => (b.bis - b.von) / TAG > LANG_TAGE && !bereiche.sommer.some((x) => b.von < x.bis && x.von < b.bis))
-    .map((b) => ({
-      von: Z.format(b.von), bis: Z.format(b.bis), bei: b.bei, tage: Math.round(((b.bis - b.von) / TAG) * 10) / 10,
-      weihnachten: bereiche.weihnachten.some((x) => b.von < x.bis && x.von < b.bis),
-    }));
-  // Künstliche Ausgleichswochen: zusammenhängende Ausgleichsblöcke des Werktagstauschs (Regel 4)
-  let ausgleich = 0;
-  let davor = false;
-  for (const x of iv) {
-    if (x.bis <= ab) continue;
-    const ist = /^Ausgleich/.test(x.grund ?? '');
-    if (ist && !davor) ausgleich++;
-    davor = ist;
-  }
-  return { jahre: je, lang, ausgleich };
+const blockText = (b) => ({ von: Z.format(b.von), bis: Z.format(b.bis), bei: b.bei, tage: Math.round(((b.bis - b.von) / TAG) * 10) / 10 });
+
+/** Weihnachten/Neujahr eines Jahres: geht auf, wenn kein Block über LANG_TAGE den Zeitraum Ferienbeginn bis Schulbeginn berührt. */
+function weihnachtsLage(bl, w) {
+  const lang = bl.filter((b) => b.von < w.bis && w.von < b.bis && (b.bis - b.von) / TAG > LANG_TAGE).map(blockText);
+  return { aufgeht: lang.length === 0, lang };
 }
 
 /**
  * @param {object} e
  * @param {object[]} e.regeln  alle Regelversionen
  * @param {object[]} e.ferien
- * @param {object[]} e.antraege
+ * @param {object[]} [e.antraege]
  * @param {number} e.jetzt     Minutenwert; Stichtage liegen danach
- * @returns {{ basis, kandidaten: object[], vorschlaege: object[] }}
  */
 function rhythmusAnalyse({ regeln, ferien, antraege = [], jetzt }) {
   const versionen = [...regeln].sort((a, b) => (a.gueltigAb < b.gueltigAb ? -1 : 1));
   const letzte = versionen.at(-1);
   const horizont = ferienAbgedecktBis(versionen, ferien);
-  const leer = { basis: null, kandidaten: [], vorschlaege: [], pruefe: () => null };
-  if (horizont === null) return leer;
-  const planVon = Z.parse(versionen[0].planbeginn);
-  const zeitraum = { von: Z.format(planVon), bis: Z.format(horizont) };
+  if (horizont === null) return { weihnachten: [], kandidaten: [], vorschlaege: [], pruefe: () => null };
+  const zeitraum = { von: versionen[0].planbeginn, bis: Z.format(horizont) };
   const jahre = betreuungsjahre(versionen, ferien).filter((j) => Z.parse(j.bis) <= horizont);
   const basisPlan = berechnePlan({ regeln: versionen, ferien, antraege, zeitraum });
+  const basisIv = basisPlan._intern.intervalle;
+  const basisBl = bloecke(basisIv);
 
-  // Kandidaten: der erste Rhythmus-Wechselzeitpunkt nach jedem Ferienende (Schulbeginn), in der Zukunft, nach der letzten Regelversion
+  const weihnachtsZeiten = ferien.filter((f) => f.art === 'weihnachten')
+    .map((f) => ({ jahr: Z.jahr(Z.parse(f.erster)), von: Z.parse(f.erster), bis: schulbeginnTag(f) }))
+    .filter((w) => w.bis <= horizont)
+    .sort((a, b) => a.von - b.von);
+  const weihnachten = weihnachtsZeiten.filter((w) => w.bis > jetzt).map((w) => ({ jahr: w.jahr, ...weihnachtsLage(basisBl, w) }));
+
   const r = letzte.rhythmus;
   const ref = Z.parse(r.referenzBeginn);
   const zyklus = r.zyklusTage * TAG;
-  const startZeiten = new Set();
-  for (const f of ferien) {
-    const b = schulbeginnTag(f);
-    const s = ref + Math.ceil((b - ref) / zyklus) * zyklus;
-    if (s > jetzt && s >= Z.parse(letzte.gueltigAb) && s < horizont) startZeiten.add(s);
-  }
-  const bereich = (art) => ferien.filter((f) => f.art === art).map((f) => ({ von: Z.parse(f.erster), bis: schulbeginnTag(f) }));
-  const bereiche = { sommer: bereich('sommer'), weihnachten: bereich('weihnachten') };
-  const basis = messen(basisPlan, jahre, jetzt, bereiche);
+  const moeglich = (s) => s > jetzt && s >= Z.parse(letzte.gueltigAb) && s < horizont;
+  const naechte = (iv, j) => {
+    const n = bilanz(iv, Z.parse(j.von), Z.parse(j.bis)).naechte;
+    return { jahr: j.jahr, papa: n.papa, mama: n.mama, abw: Math.abs(n.papa - n.mama) / 2 };
+  };
 
-  const bewerte = (s) => {
+  /** Bewertet einen Rhythmuswechsel am Wechselzeitpunkt s. */
+  const bewerte = (s, extra = {}) => {
     const neu = { ...letzte, rhythmus: { ...r, referenzBei: anderer(r.referenzBei) }, gueltigAb: Z.format(s) };
     const plan = berechnePlan({ regeln: [...versionen, neu], ferien, antraege, zeitraum });
-    const m = messen(plan, jahre, s, bereiche);
-    const betroffen = m.jahre.filter((j) => Z.parse(jahre.find((x) => x.jahr === j.jahr).bis) > s);
-    const basisJahre = basis.jahre.filter((j) => betroffen.some((b) => b.jahr === j.jahr));
-    const verteilungOk = betroffen.every((j) => j.abw <= Math.max(TOLERANZ_NAECHTE, basisJahre.find((b) => b.jahr === j.jahr).abw));
-    const langVorher = basis.lang.filter((b) => Z.parse(b.bis) > s);
-    const lang = m.lang;
-    const weihVorher = langVorher.filter((b) => b.weihnachten).length;
-    const weih = lang.filter((b) => b.weihnachten).length;
-    const summeAbw = betroffen.reduce((a, j) => a + j.abw, 0);
-    const summeAbwVorher = basisJahre.reduce((a, j) => a + j.abw, 0);
-    const ausgleichVorher = messen(basisPlan, jahre, s, bereiche).ausgleich;
+    const iv = plan._intern.intervalle;
+    const bl = bloecke(iv);
+    const wirkung = weihnachtsZeiten.filter((w) => w.bis > s)
+      .map((w) => ({ jahr: w.jahr, vorher: weihnachtsLage(basisBl, w), nachher: weihnachtsLage(bl, w) }));
+    const ziel = wirkung[0] ?? null;
+    // Verteilung: das Betreuungsjahr des Wechsels und das folgende (Weihnachten liegt am Übergang)
+    const bj = jahre.filter((j) => Z.parse(j.bis) > s).slice(0, 2)
+      .map((j) => ({ ...naechte(iv, j), vorher: naechte(basisIv, j) }));
+    const verteilungOk = bj.every((j) => j.abw <= Math.max(TOLERANZ_NAECHTE, j.vorher.abw));
+    let grund = null;
+    if (!ziel) grund = 'Danach ist kein Weihnachten mit Ferienterminen hinterlegt.';
+    else if (ziel.vorher.aufgeht) grund = `Weihnachten ${ziel.jahr} geht bereits auf.`;
+    else if (ziel.nachher.lang.length >= ziel.vorher.lang.length) grund = `Weihnachten ${ziel.jahr} wird dadurch nicht besser.`;
+    else if (!verteilungOk) grund = 'Die Nächte je Betreuungsjahr würden zu ungleich.';
     return {
       stichtag: Z.format(s),
       parameter: { rhythmus: { referenzBei: anderer(r.referenzBei) } },
-      jahre: betroffen.map((j) => ({ ...j, vorher: basisJahre.find((b) => b.jahr === j.jahr) })),
-      langVorher, lang,
-      weniger: langVorher.length - lang.length,
-      weihnachtenVorher: weihVorher, weihnachten: weih,
-      ausgleichVorher, ausgleich: m.ausgleich,
-      summeAbw, summeAbwVorher,
-      verteilungOk,
-      besser: verteilungOk && (weih < weihVorher || m.ausgleich < ausgleichVorher || lang.length < langVorher.length
-        || (lang.length === langVorher.length && summeAbw <= summeAbwVorher - 1)),
+      ziel, spaeter: wirkung.slice(1), jahre: bj, verteilungOk,
+      vorschlag: grund === null, grund,
+      ...extra,
     };
   };
-  const kandidaten = [...startZeiten].sort((a, b) => a - b).map(bewerte);
-  const vorschlaege = kandidaten.filter((k) => k.besser)
-    .sort((a, b) => (a.weihnachten - a.weihnachtenVorher) - (b.weihnachten - b.weihnachtenVorher)
-      || (a.ausgleich - a.ausgleichVorher) - (b.ausgleich - b.ausgleichVorher)
-      || (a.lang.length - a.langVorher.length) - (b.lang.length - b.langVorher.length)
-      || a.summeAbw - b.summeAbw || (a.stichtag < b.stichtag ? -1 : 1));
-  /** Bewertet einen frei gewählten Wechsel: der erste Rhythmus-Wechselzeitpunkt ab `datum` (YYYY-MM-DD). null, wenn nicht möglich. */
+
+  // Kandidaten: jede Ausgleichswoche aus dem Werktagstausch (Frühjahr/Herbst) im heutigen Plan.
+  // Der Wechsel liegt am Freitag der Ferienwoche (letzter Rhythmus-Wechselzeitpunkt vor Beginn der Ausgleichswoche).
+  const kandidaten = [];
+  for (const iv of basisIv) {
+    const m = /^Ausgleich (Frühjahr|Herbst)$/.exec(iv.grund ?? '');
+    if (!m || iv.vorlaeufig) continue;
+    const s = ref + Math.floor((iv.von - ref) / zyklus) * zyklus;
+    if (!moeglich(s) || kandidaten.some((k) => k.stichtag === Z.format(s))) continue;
+    const art = m[1] === 'Herbst' ? 'herbst' : 'fruehjahr';
+    kandidaten.push(bewerte(s, {
+      ferien: `${FERIEN_NAME[art]} ${Z.jahr(iv.von)}`,
+      bekommt: iv.bei, // erhält statt der Ausgleichswoche eine volle Woche ab Freitag
+      ausgleich: { von: Z.format(iv.von), bis: Z.format(iv.bis), bei: iv.bei },
+    }));
+  }
+  const vorschlaege = kandidaten.filter((k) => k.vorschlag)
+    .sort((a, b) => a.ziel.nachher.lang.length - b.ziel.nachher.lang.length || (a.stichtag < b.stichtag ? -1 : 1));
+
+  /** Frei gewählter Wechsel: erster Rhythmus-Wechselzeitpunkt ab `datum` (YYYY-MM-DD); null, wenn nicht möglich. */
   const pruefe = (datum) => {
     const t = Z.tag(Z.parse(datum));
     const s = ref + Math.ceil((t - ref) / zyklus) * zyklus;
-    if (s <= jetzt || s < Z.parse(letzte.gueltigAb) || s >= horizont) return null;
-    return kandidaten.find((k) => k.stichtag === Z.format(s)) ?? bewerte(s);
+    if (!moeglich(s)) return null;
+    return kandidaten.find((k) => k.stichtag === Z.format(s)) ?? bewerte(s, { eigen: true });
   };
-  return { basis, kandidaten, vorschlaege, pruefe };
+
+  return { weihnachten, kandidaten, vorschlaege, pruefe };
 }
 
 return { TOLERANZ_NAECHTE, LANG_TAGE, bloecke, rhythmusAnalyse };
@@ -2570,7 +2571,8 @@ function jahrSeite(d, state) {
 return { FERIEN_NAMEN, legendeHtml, monatGitter, monatHinweise, kalenderSeite, jahrMonate, jahrChips, jahrSeite };
 };
 __f['ui/rhythmus.js'] = function () {
-// Rhythmus-Assistent: Vorschläge für einen Rhythmuswechsel (Berechnung in src/app/rhythmus.js).
+// Rhythmus-Assistent: Ausgleichswoche als Rhythmuswechsel, wenn dadurch Weihnachten/Neujahr aufgeht
+// (Berechnung in src/app/rhythmus.js).
 
 const Z = __r('engine/zeit.js');
 const { anderer } = __r('engine/engine.js');
@@ -2581,60 +2583,66 @@ const { ivAt } = __r('ui/daten.js');
 
 const wtDatumUhr = (z) => `${wt(z)} ${datumDE(z.slice(0, 10))} ${uhr(z)} Uhr`;
 const tage = (b) => `${datumDE(b.von.slice(0, 10))} – ${datumDE(b.bis.slice(0, 10))}`;
-const blockZeile = (b) => `<li><span class="wer ${b.bei}">${NAME[b.bei]}</span> ${esc(tage(b))} · ${String(b.tage).replace('.', ',')} Tage${b.weihnachten ? ' · <b>Weihnachten/Neujahr</b>' : ''}</li>`;
+const blockZeile = (b) => `<li><span class="wer ${b.bei}">${NAME[b.bei]}</span> ${esc(tage(b))} · ${String(b.tage).replace('.', ',')} Tage am Stück</li>`;
+const lageText = (l) => (l.aufgeht ? 'geht auf' : `${l.lang.length} Doppelwoche${l.lang.length === 1 ? '' : 'n'}`);
 
 function wirkung(d, k) {
   const s = Z.parse(k.stichtag);
-  const bleibt = ivAt(d, s - 1)?.bei;
-  const jahre = k.jahre.map((j) => `${j.jahr}: Papa ${j.papa} / Mama ${j.mama}${j.vorher && (j.vorher.papa !== j.papa) ? ` (vorher ${j.vorher.papa} / ${j.vorher.mama})` : ''}`).join(' · ');
-  const davor = bleibt ? `Am ${esc(wtDatumUhr(k.stichtag))} bleibt Lotte eine Woche länger bei <b>${NAME[bleibt]}</b>; danach` : 'Danach';
-  return `<p>${davor} läuft der Rhythmus andersherum weiter. Das ist eine ganz normale Regeländerung, die ${esc(NAME[anderer(d.ich.rolle)])} bestätigen muss.</p>
-    <ul class="zeilen">
-      <li><b>Weihnachten/Neujahr:</b> Blöcke über ${LANG_TAGE} Tage am Stück ${k.weihnachtenVorher} → ${k.weihnachten}</li>
-      <li><b>Künstliche Ausgleichswochen</b> (Werktagstausch bei Frühjahr/Herbst): ${k.ausgleichVorher} → ${k.ausgleich}</li>
-      <li><b>Alle langen Blöcke</b> (ohne Sommer): ${k.langVorher.length} → ${k.lang.length}</li>
-      <li><b>Nächte je Betreuungsjahr:</b> ${esc(jahre)}</li>
-    </ul>
-    ${k.lang.length ? `<details class="aufklapp"><summary>Lange Blöcke danach (${k.lang.length})</summary><ul class="zeilen">${k.lang.map(blockZeile).join('')}</ul></details>` : ''}`;
+  const wer = k.bekommt ?? anderer(ivAt(d, s - 1)?.bei ?? 'papa');
+  const satz = k.ausgleich
+    ? `Statt der Ausgleichswoche nach den Ferien (${esc(tage(k.ausgleich))}) bekommt <b>${NAME[wer]}</b> ab ${esc(wtDatumUhr(k.stichtag))} eine volle Woche; danach läuft der Freitagsrhythmus andersherum (gerade ↔ ungerade).`
+    : `Ab ${esc(wtDatumUhr(k.stichtag))} bekommt <b>${NAME[wer]}</b> die Woche; danach läuft der Freitagsrhythmus andersherum (gerade ↔ ungerade).`;
+  const zeilen = [];
+  if (k.ziel) {
+    zeilen.push(`<li><b>Weihnachten/Neujahr ${k.ziel.jahr}:</b> ${lageText(k.ziel.vorher)} → <b>${lageText(k.ziel.nachher)}</b></li>`);
+  }
+  for (const w of k.spaeter) {
+    if (w.vorher.aufgeht !== w.nachher.aufgeht || w.vorher.lang.length !== w.nachher.lang.length) {
+      zeilen.push(`<li>Weihnachten/Neujahr ${w.jahr}: ${lageText(w.vorher)} → ${lageText(w.nachher)}${w.nachher.aufgeht ? '' : ' (dafür kann im Jahr davor wieder ein Wechsel vorgeschlagen werden)'}</li>`);
+    }
+  }
+  zeilen.push(`<li><b>Nächte je Betreuungsjahr:</b> ${esc(k.jahre.map((j) => `${j.jahr}: Papa ${j.papa} / Mama ${j.mama}${j.vorher.papa !== j.papa ? ` (vorher ${j.vorher.papa} / ${j.vorher.mama})` : ''}`).join(' · '))}</li>`);
+  return `<p>${satz} Das ist eine normale Regeländerung; ${NAME[anderer(d.ich.rolle)]} muss sie bestätigen.</p>
+    <ul class="zeilen">${zeilen.join('')}</ul>
+    ${k.ziel && !k.ziel.nachher.aufgeht && k.ziel.nachher.lang.length ? `<details class="aufklapp"><summary>Doppelwochen danach</summary><ul class="zeilen">${k.ziel.nachher.lang.map(blockZeile).join('')}</ul></details>` : ''}
+    ${k.grund ? `<p class="klein"><b>Kein Vorschlag:</b> ${esc(k.grund)}</p>` : ''}`;
 }
 
-function karte(d, k, empfohlen) {
+function karte(d, k) {
+  const titel = k.ferien ? `${k.ferien}: Rhythmuswechsel statt Ausgleichswoche` : `Eigener Wechsel ab ${wtDatumUhr(k.stichtag)}`;
   return `<article class="karte">
-    <header><h3>Wechsel ab ${esc(wtDatumUhr(k.stichtag))}</h3>${empfohlen ? '<span class="status st-bestaetigt">Vorschlag</span>' : (k.verteilungOk ? '' : '<span class="status st-abgelehnt">Verteilung außerhalb</span>')}</header>
+    <header><h3>${esc(titel)}</h3>${k.vorschlag ? '<span class="status st-bestaetigt">Vorschlag</span>' : ''}</header>
     ${wirkung(d, k)}
-    <div class="aktionen"><button class="knopf${empfohlen ? ' primaer' : ''}" data-act="rhythmusAntrag" data-stichtag="${esc(k.stichtag)}">Als Regeländerung beantragen …</button></div>
+    <div class="aktionen"><button class="knopf${k.vorschlag ? ' primaer' : ''}" data-act="rhythmusAntrag" data-stichtag="${esc(k.stichtag)}">Als Regeländerung beantragen …</button></div>
   </article>`;
 }
 
 function rhythmusSeite(d) {
   const a = d.rhythmusAnalyse;
-  if (!a?.basis) return '<h2>Rhythmus-Assistent</h2><p class="leer">Ohne hinterlegte Ferientermine lässt sich nichts berechnen.</p>';
+  if (!a?.weihnachten?.length) return '<h2>Rhythmus-Assistent</h2><p class="leer">Ohne hinterlegte Weihnachtsferien lässt sich nichts berechnen.</p>';
   const offen = d.offen.some((x) => x.art === 'regelaenderung');
-  const top = a.vorschlaege.slice(0, 3);
   const eigen = app.state.rhythmusEigen ?? null;
-  const rest = a.kandidaten.filter((k) => !top.includes(k) && k !== eigen);
+  const weitere = a.kandidaten.filter((k) => !k.vorschlag);
   return `<h2>Rhythmus-Assistent</h2>
-    <p class="klein">Die Weihnachtsregel bleibt, wie sie ist. Ein <b>Rhythmuswechsel</b> dreht den festen Freitagswechsel einmalig von „gerade“ auf „ungerade“ (oder umgekehrt): Lotte bleibt eine Woche länger, danach läuft der Rhythmus andersherum. Das legt fest, wer die Woche vor Weihnachten und die Ferienwochen bekommt, und kann künstliche Ausgleichswochen und Doppelwochen vermeiden. Die App rechnet jeden Wechsel nach Ferienende bis zum Ende der hinterlegten Ferientermine durch und schlägt nur vor, was Doppelwochen über Weihnachten, Ausgleichswochen oder lange Blöcke (über ${LANG_TAGE} Tage) verringert und die Nächte je Betreuungsjahr nahe an der Hälfte hält (höchstens ${TOLERANZ_NAECHTE} Nächte Abweichung vom Mittel, oder nicht schlechter als heute). Ob ein Vorschlag beantragt wird, entscheidet ihr; ihr könnt auch ohne Vorschlag einen eigenen Wechsel prüfen und beantragen.</p>
-    ${offen ? '<p class="hinweis warn">Es ist bereits eine Regeländerung offen. Erst diese entscheiden, dann ein weiterer Wechsel.</p>' : ''}
-    <h3>Heute: lange Blöcke ab jetzt (ohne Sommer)</h3>
-    ${a.basis.lang.length ? `<ul class="zeilen">${a.basis.lang.map(blockZeile).join('')}</ul>` : '<p class="leer">Keine.</p>'}
-    <h3>${top.length ? 'Vorschläge' : 'Kein Vorschlag'}</h3>
-    ${top.length ? top.map((k) => karte(d, k, true)).join('') : '<p class="leer">Kein Wechsel verbessert den Plan, ohne die Jahresverteilung zu verschlechtern.</p>'}
+    <p class="klein">Frühjahr und Herbst gehören je nach Sommerrotation einem festen Elternteil. Fällt die Ferienwoche laut Rhythmus dem anderen zu, bekommt dieser danach eine <b>Ausgleichswoche</b>. Diese Ausgleichswoche kann stattdessen als <b>Rhythmuswechsel</b> genutzt werden: Der Freitagswechsel dreht von gerade auf ungerade (oder umgekehrt). Die App schlägt das nur vor, wenn dadurch <b>Weihnachten/Neujahr</b> (letzte Woche des Jahres und erste des Folgejahres) ohne Doppelwoche aufgeht und die Nächte je Betreuungsjahr nahe an der Hälfte bleiben (höchstens ${TOLERANZ_NAECHTE} Nächte Abweichung vom Mittel oder nicht schlechter als heute). Geht Weihnachten ohnehin auf, gibt es keinen Vorschlag. Die Weihnachtsregel selbst bleibt unverändert. Doppelwoche heißt: mehr als ${LANG_TAGE} Tage am Stück bei einem Elternteil.</p>
+    ${offen ? '<p class="hinweis warn">Es ist bereits eine Regeländerung offen. Erst diese entscheiden.</p>' : ''}
+    <h3>Weihnachten/Neujahr heute</h3>
+    <ul class="zeilen">${a.weihnachten.map((w) => `<li><b>${w.jahr}/${String(w.jahr + 1).slice(2)}:</b> ${w.aufgeht ? 'geht auf' : `geht nicht auf – ${w.lang.map((b) => `${NAME[b.bei]} ${tage(b)} (${String(b.tage).replace('.', ',')} Tage)`).join(', ')}`}</li>`).join('')}</ul>
+    <h3>${a.vorschlaege.length ? 'Vorschlag' : 'Kein Vorschlag'}</h3>
+    ${a.vorschlaege.length ? a.vorschlaege.map((k) => karte(d, k)).join('') : '<p class="leer">Keine Ausgleichswoche, deren Umwandlung Weihnachten/Neujahr aufgehen ließe – oder Weihnachten geht bereits auf.</p>'}
+    ${weitere.length ? `<details class="aufklapp"><summary>Weitere Ausgleichswochen ohne Vorschlag (${weitere.length})</summary>${weitere.map((k) => karte(d, k)).join('')}</details>` : ''}
     <h3>Eigenen Wechsel prüfen</h3>
+    <p class="klein">Auch ohne Vorschlag könnt ihr einen Wechsel durchsetzen: Datum wählen, prüfen, beantragen. Der Wechsel gilt ab dem ersten Freitag-Wechselzeitpunkt (15:00) an oder nach dem Datum.</p>
     <div class="zeile"><input type="date" id="rhythmusDatum" aria-label="Wechsel ab Datum" value="${esc(eigen ? eigen.stichtag.slice(0, 10) : Z.formatDatum(Z.plusTage(Z.tag(d.jetzt), 14)))}">
       <button class="knopf" data-act="rhythmusPruefen">Prüfen</button></div>
-    <p class="klein">Der Wechsel gilt ab dem ersten Freitag-Wechselzeitpunkt (15:00) an oder nach diesem Datum.</p>
-    ${eigen ? karte(d, eigen, false) : ''}
-    ${rest.length ? `<details class="aufklapp"><summary>Alle weiteren geprüften Wechsel (${rest.length})</summary>${rest.map((k) => karte(d, k, false)).join('')}</details>` : ''}`;
+    ${eigen ? karte(d, eigen) : ''}`;
 }
 
 /** Hinweis für die Startseite, nur bei einem Vorschlag und ohne offene Regeländerung. */
 function rhythmusHinweis(d) {
   const k = d.rhythmusAnalyse?.vorschlaege?.[0];
   if (!k || d.offen.some((x) => x.art === 'regelaenderung')) return '';
-  const weih = k.weihnachtenVorher > k.weihnachten ? ` Weniger Doppelwochen über Weihnachten/Neujahr (${k.weihnachtenVorher} → ${k.weihnachten}).`
-    : k.ausgleichVorher > k.ausgleich ? ` Weniger Ausgleichswochen (${k.ausgleichVorher} → ${k.ausgleich}).` : ` Weniger lange Blöcke (${k.langVorher.length} → ${k.lang.length}).`;
-  return `<p class="hinweis"><b>Rhythmus-Vorschlag:</b> Wechsel ab ${esc(wtDatumUhr(k.stichtag))}.${weih} <a href="#/rhythmus">Ansehen</a></p>`;
+  return `<p class="hinweis"><b>Rhythmus-Vorschlag:</b> Ausgleichswoche nach ${esc(k.ferien)} als Rhythmuswechsel nutzen, dann geht Weihnachten/Neujahr ${k.ziel.jahr} ${k.ziel.nachher.aufgeht ? 'auf' : 'besser auf'}. <a href="#/rhythmus">Ansehen</a></p>`;
 }
 
 const finde = (stichtag) => app.d.rhythmusAnalyse.kandidaten.find((x) => x.stichtag === stichtag)
@@ -2644,24 +2652,22 @@ function rhythmusPruefen() {
   const datum = document.getElementById('rhythmusDatum')?.value;
   if (!datum) return meldung('Bitte ein Datum wählen', 'fehler');
   const k = app.d.rhythmusAnalyse.pruefe(datum);
-  if (!k) return meldung('Für dieses Datum ist kein Wechsel möglich (liegt in der Vergangenheit, vor der letzten Regeländerung oder nach den hinterlegten Ferienterminen).', 'fehler');
+  if (!k) return meldung('Für dieses Datum ist kein Wechsel möglich (Vergangenheit, vor der letzten Regeländerung oder nach den hinterlegten Ferienterminen).', 'fehler');
   app.state.rhythmusEigen = k;
   app.zeichne();
 }
 
 function begruendung(k) {
-  const teile = [];
-  if (k.weihnachtenVorher > k.weihnachten) teile.push(`Doppelwochen über Weihnachten/Neujahr ${k.weihnachtenVorher} → ${k.weihnachten}`);
-  if (k.ausgleichVorher !== k.ausgleich) teile.push(`Ausgleichswochen ${k.ausgleichVorher} → ${k.ausgleich}`);
-  teile.push(`lange Blöcke ${k.langVorher.length} → ${k.lang.length}`);
+  const teile = [k.ferien ? `Ausgleichswoche nach ${k.ferien} als Rhythmuswechsel` : 'Rhythmuswechsel'];
+  if (k.ziel) teile.push(`Weihnachten/Neujahr ${k.ziel.jahr}: ${lageText(k.ziel.vorher)} → ${lageText(k.ziel.nachher)}`);
   teile.push(`Nächte: ${k.jahre.map((j) => `${j.jahr} Papa ${j.papa}/Mama ${j.mama}`).join(', ')}`);
-  return `Rhythmuswechsel (Phasenverschiebung um eine Woche): ${teile.join('; ')}.`;
+  return `${teile.join('; ')}.`;
 }
 
 function rhythmusAntragDialog(stichtag) {
   const k = finde(stichtag);
   zeigeModal(`<h2>Rhythmuswechsel beantragen</h2><div id="mfehler" class="fehler" role="alert" hidden></div>
-    <p><b>Ab ${esc(wtDatumUhr(stichtag))}</b> läuft der Wochenrhythmus andersherum (Regeländerung „Lotte ist ab dem Referenzzeitpunkt bei“).</p>
+    <p><b>Ab ${esc(wtDatumUhr(stichtag))}</b> läuft der Freitagsrhythmus andersherum (Regeländerung „Lotte ist ab dem Referenzzeitpunkt bei“).${k.ausgleich ? ' Die Ausgleichswoche entfällt dadurch.' : ''}</p>
     <label>Begründung<textarea data-f="begruendung" rows="4">${esc(begruendung(k))}</textarea></label>
     <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button><button class="knopf primaer" data-act="rhythmusSenden" data-stichtag="${esc(stichtag)}">Beantragen</button></div>`);
 }
