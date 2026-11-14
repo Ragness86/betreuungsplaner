@@ -1,0 +1,3652 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<title>Betreuungsplaner Lotte</title>
+<style>
+:root {
+  --bg: #f4f6fa; --karte: #ffffff; --text: #1b2130; --leise: #586175; --rand: #d3d8e3;
+  --akz: #2459b8; --akz-text: #ffffff;
+  --papa: #2459b8; --papa-bg: #d8e5fb;
+  --mama: #c4600c; --mama-bg: #fde3cb;
+  --gruen: #1f8a4c; --gruen-bg: #cdeedb;
+  --warn-bg: #fff1c2; --warn: #6b4f00; --fehler: #a8231b; --fehler-bg: #fde0de;
+  --schatten: 0 1px 3px rgba(20, 30, 60, .12);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11141b; --karte: #1a1f2c; --text: #e8ecf5; --leise: #9ba5ba; --rand: #313a50;
+    --akz: #7ba7ff; --akz-text: #0b1220;
+    --papa: #7ba7ff; --papa-bg: #213a6b;
+    --mama: #ffa65c; --mama-bg: #5c3611;
+    --gruen: #5fd48e; --gruen-bg: #1c4a31;
+    --warn-bg: #4a3b0a; --warn: #ffe08a; --fehler: #ff9a92; --fehler-bg: #4a1b18;
+    --schatten: none;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11141b; --karte: #1a1f2c; --text: #e8ecf5; --leise: #9ba5ba; --rand: #313a50;
+  --akz: #7ba7ff; --akz-text: #0b1220;
+  --papa: #7ba7ff; --papa-bg: #213a6b;
+  --mama: #ffa65c; --mama-bg: #5c3611;
+  --gruen: #5fd48e; --gruen-bg: #1c4a31;
+  --warn-bg: #4a3b0a; --warn: #ffe08a; --fehler: #ff9a92; --fehler-bg: #4a1b18;
+  --schatten: none;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+:focus-visible { outline: 3px solid var(--akz); outline-offset: 2px; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+body.modal-offen { overflow: hidden; }
+h1, h2, h3 { line-height: 1.2; margin: 0 0 .4rem; }
+h2 { font-size: 1.15rem; }
+h3 { font-size: 1rem; margin-top: 1.1rem; }
+a { color: var(--akz); }
+p { margin: .3rem 0; }
+ul, ol { padding-left: 1.2rem; margin: .3rem 0; }
+.laden, .leer { padding: 2rem 1rem; text-align: center; color: var(--leise); }
+.klein { font-size: .82rem; color: var(--leise); }
+.warn { color: var(--warn); }
+
+/* Rahmen */
+header.kopf {
+  position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; padding: 6px 12px; min-height: 44px; background: var(--karte); border-bottom: 1px solid var(--rand);
+}
+header.kopf h1 { font-size: 1.05rem; margin: 0; }
+.rolle { display: flex; align-items: center; gap: 6px; font-size: .85rem; }
+.rollenschalter { display: inline-flex; border: 1px solid var(--rand); border-radius: 8px; overflow: hidden; }
+.rollenschalter button { border: 0; background: transparent; color: var(--text); padding: 6px 10px; font: inherit; font-size: .85rem; min-height: 32px; }
+.rollenschalter button[aria-pressed="true"] { background: var(--akz); color: var(--akz-text); font-weight: 700; }
+main { max-width: 760px; margin: 0 auto; padding: 12px 12px 84px; }
+nav.tabs {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: grid; grid-template-columns: repeat(5, 1fr);
+  background: var(--karte); border-top: 1px solid var(--rand); padding-bottom: env(safe-area-inset-bottom);
+}
+nav.tabs a {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 52px;
+  text-decoration: none; color: var(--leise); font-size: .72rem; position: relative;
+}
+nav.tabs a[aria-current="page"] { color: var(--akz); font-weight: 700; }
+nav.tabs .sym { font-size: 1.15rem; line-height: 1; }
+nav.tabs .zaehler {
+  position: absolute; top: 4px; left: calc(50% + 6px); min-width: 18px; padding: 0 5px; border-radius: 9px;
+  background: var(--fehler); color: #fff; font-size: .68rem; text-align: center;
+}
+
+/* Bausteine */
+.karte { background: var(--karte); border: 1px solid var(--rand); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; box-shadow: var(--schatten); }
+.karte h2 { font-size: .72rem; text-transform: uppercase; letter-spacing: .04em; color: var(--leise); margin-bottom: 2px; }
+.gross { font-size: 1.2rem; font-weight: 700; margin: 0; }
+.gross a { text-decoration: none; }
+.dringend { color: var(--fehler); }
+.wer { display: inline-block; padding: 0 .45em; border-radius: 6px; font-weight: 700; }
+.wer.papa { background: var(--papa-bg); color: var(--text); border-left: 3px solid var(--papa); }
+.wer.mama { background: var(--mama-bg); color: var(--text); border-left: 3px solid var(--mama); }
+.hinweis { background: var(--papa-bg); border-radius: 8px; padding: 8px 10px; font-size: .9rem; }
+.hinweis.warn { background: var(--warn-bg); color: var(--warn); }
+.fehler { background: var(--fehler-bg); color: var(--fehler); border-radius: 8px; padding: 8px 10px; margin: 8px 0; font-weight: 600; }
+.knopf {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 14px; border-radius: 10px;
+  border: 1px solid var(--rand); background: var(--karte); color: var(--text); font: inherit; font-weight: 600; text-decoration: none; cursor: pointer;
+}
+.knopf.primaer { background: var(--akz); color: var(--akz-text); border-color: var(--akz); }
+.knopf.klein-knopf { min-height: 34px; padding: 0 10px; font-size: .85rem; }
+.aktionen { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 4px; }
+.kopfzeile { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+.kopfzeile h2 { margin: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
+.chip { display: inline-flex; align-items: center; min-height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--rand); background: var(--karte); color: var(--text); font: inherit; font-size: .9rem; text-decoration: none; cursor: pointer; }
+.chip.aktiv { background: var(--akz); color: var(--akz-text); border-color: var(--akz); font-weight: 700; }
+.marke { display: inline-block; font-size: .72rem; border: 1px solid var(--rand); border-radius: 6px; padding: 0 .4em; }
+.marke.warn { background: var(--warn-bg); border-color: transparent; }
+
+/* Kalender */
+.monatnav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.monatnav h2, h2.monat { margin: 0; }
+h2.monat { font-size: 1.05rem; margin-bottom: 6px; }
+h2.monat a { text-decoration: none; color: var(--text); }
+.monatnav .knopf { min-width: 44px; font-size: 1.3rem; }
+.gitter { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+.gitter .kopf { text-align: center; font-size: .72rem; color: var(--leise); padding: 2px 0; }
+.tag {
+  position: relative; min-height: 56px; padding: 2px 2px 2px 3px; border: 1px solid var(--rand); border-radius: 6px;
+  background: var(--karte); color: var(--text); font: inherit; text-align: left;
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 0; cursor: pointer;
+}
+.tag.leer { border: 0; background: transparent; cursor: default; }
+.tag.n-papa { background: var(--papa-bg); border-left: 4px solid var(--papa); }
+.tag.n-mama { background: var(--mama-bg); border-left: 4px solid var(--mama); }
+.tag.ausgleich { background: var(--gruen-bg); border-left-color: var(--gruen); }
+.tag.vorplan { opacity: .45; }
+.tag.vorl, .probe.vorl-probe {
+  background-image: repeating-linear-gradient(135deg, transparent 0 4px, rgba(120, 120, 120, .35) 4px 6px);
+}
+.tag.offen { outline: 2px dashed var(--akz); outline-offset: -3px; }
+.tag.heute { box-shadow: 0 0 0 2px var(--text); }
+.tag .n { font-weight: 700; font-size: .85rem; line-height: 1.1; }
+.tag .m { font-size: .68rem; font-weight: 700; line-height: 1.1; }
+.tag .m .f { margin-left: 3px; padding: 0 2px; border-radius: 3px; background: var(--text); color: var(--bg); font-size: .62rem; }
+.tag .m .ft { margin-left: 2px; color: var(--fehler); font-size: .7rem; }
+.tag .m .tm { margin-left: 2px; color: var(--akz); font-size: .6rem; }
+.tag .u { font-size: .62rem; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.legende { display: flex; flex-wrap: wrap; gap: 4px 12px; list-style: none; padding: 0; margin: 10px 0 4px; font-size: .78rem; color: var(--leise); }
+.legende li { display: flex; align-items: center; gap: 5px; }
+.probe { display: inline-block; width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--rand); font-size: .6rem; text-align: center; line-height: 14px; font-weight: 700; color: var(--text); }
+.probe.n-papa { background: var(--papa-bg); border-left: 4px solid var(--papa); }
+.probe.n-mama { background: var(--mama-bg); border-left: 4px solid var(--mama); }
+.probe.ausgleich { background: var(--gruen-bg); border-left-color: var(--gruen); }
+.probe.tm-probe { color: var(--akz); border: 0; }
+.probe.offen-probe { outline: 2px dashed var(--akz); outline-offset: -3px; }
+.jahrgitter { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+@media (min-width: 640px) { .jahrgitter { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.mini h3 { font-size: .85rem; margin: 0 0 3px; }
+.mini h3 a { text-decoration: none; color: var(--text); }
+.minigitter { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; }
+.mt { font-style: normal; font-size: .56rem; text-align: center; padding: 3px 0; border-radius: 2px; background: var(--karte); line-height: 1; font-variant-numeric: tabular-nums; }
+.mt.leer { background: transparent; }
+.mt.n-papa { background: var(--papa-bg); }
+.mt.n-mama { background: var(--mama-bg); }
+.mt.ausgleich { background: var(--gruen-bg); box-shadow: inset 0 -2px 0 var(--gruen); }
+.mt.vorplan { opacity: .4; }
+.mt.vorl { background-image: repeating-linear-gradient(135deg, transparent 0 3px, rgba(120, 120, 120, .35) 3px 4px); }
+.mt.ferien { text-decoration: underline; font-weight: 700; }
+.mt.offen { outline: 1px dashed var(--akz); outline-offset: -1px; }
+
+/* Listen */
+.liste { list-style: none; padding: 0; margin: 6px 0; }
+.liste > li { background: var(--karte); border: 1px solid var(--rand); border-radius: 10px; padding: 8px 10px; margin-bottom: 6px; }
+.liste.kompakt > li { padding: 4px 8px; margin-bottom: 3px; font-size: .9rem; }
+.uebergaben li { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; align-items: center; }
+.uebergaben .zeit { font-weight: 700; font-variant-numeric: tabular-nums; }
+.uebergaben .grund { grid-column: 1 / -1; font-size: .82rem; color: var(--leise); }
+.uebergaben li.vergangen { opacity: .6; }
+.verlauf .zeit { color: var(--leise); font-size: .82rem; }
+.zeilen { list-style: none; padding: 0; }
+.zeilen li { margin: 2px 0; }
+article.antrag header { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+article.antrag h3 { margin: 0; font-size: 1rem; }
+.status { font-size: .75rem; font-weight: 700; padding: 1px 8px; border-radius: 10px; background: var(--rand); }
+.status.st-offen { background: var(--warn-bg); color: var(--warn); }
+.status.st-bestaetigt { background: var(--gruen-bg); }
+.status.st-abgelehnt, .status.st-verfallen { background: var(--fehler-bg); color: var(--fehler); }
+.kommentar { border-left: 3px solid var(--rand); padding-left: 8px; }
+.tabellenrahmen { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: .88rem; background: var(--karte); }
+th, td { padding: 5px 7px; border-bottom: 1px solid var(--rand); text-align: left; }
+td { font-variant-numeric: tabular-nums; }
+.bilanz td, .bilanz thead th:not(:first-child) { text-align: right; }
+.monate td, .monate th, .erklaerung td { white-space: nowrap; }
+.erklaerung td { text-align: right; }
+tfoot th, tfoot td { font-weight: 700; }
+.saldoreihe { list-style: none; padding: 0; }
+.saldoreihe li { display: grid; grid-template-columns: 3rem 1fr auto; gap: 8px; align-items: center; margin: 4px 0; font-size: .85rem; }
+.balken { height: 10px; background: var(--rand); border-radius: 5px; overflow: hidden; }
+.balken i { display: block; height: 100%; }
+.balken i.pos { background: var(--papa); }
+.balken i.neg { background: var(--mama); }
+.pruefungen { list-style: none; padding: 0; }
+.pruefungen .ok { color: var(--gruen); }
+.pruefungen .nok { color: var(--fehler); }
+details.aufklapp { margin-top: 12px; background: var(--karte); border: 1px solid var(--rand); border-radius: 10px; padding: 8px 10px; }
+details.aufklapp summary { cursor: pointer; font-weight: 700; min-height: 32px; }
+.regeltext li { margin-bottom: 8px; }
+.menue { list-style: none; padding: 0; }
+.menue li a { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0 14px; margin-bottom: 6px; background: var(--karte); border: 1px solid var(--rand); border-radius: 10px; text-decoration: none; color: var(--text); font-weight: 600; }
+
+/* Dialoge */
+#modal .rahmen { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; background: rgba(0, 0, 0, .5); }
+#modal .box { width: 100%; max-width: 560px; max-height: 92vh; overflow: auto; background: var(--bg); border-radius: 16px 16px 0 0; padding: 16px; }
+@media (min-width: 640px) { #modal .rahmen { align-items: center; } #modal .box { border-radius: 16px; } }
+.box label { display: block; margin: 10px 0; font-weight: 600; font-size: .9rem; }
+.box label.check { display: flex; gap: 8px; align-items: center; min-height: 44px; }
+.box input, .box select, .box textarea {
+  display: block; width: 100%; min-height: 44px; margin-top: 4px; padding: 8px 10px; font: inherit; color: var(--text);
+  background: var(--karte); border: 1px solid var(--rand); border-radius: 8px;
+}
+.box input[type="checkbox"] { width: 22px; height: 22px; min-height: 22px; margin: 0; }
+.box fieldset { border: 1px solid var(--rand); border-radius: 10px; margin: 10px 0; padding: 6px 10px 10px; }
+.box legend { font-weight: 700; font-size: .85rem; padding: 0 6px; }
+.zeile { display: grid; grid-template-columns: 3rem 1fr 6.5rem; gap: 6px; align-items: center; margin-top: 6px; }
+.zeile > * { min-width: 0; }
+.box fieldset { min-width: 0; }
+.bilanz tfoot td { white-space: nowrap; }
+.zeile > :only-child { grid-column: 1 / -1; }
+.zeile input, .zeile select { margin-top: 0; }
+label > .zeile { grid-template-columns: 1fr 6.5rem; }
+.diff { font-weight: 700; color: var(--gruen); }
+#toast { position: fixed; left: 12px; right: 12px; bottom: 70px; z-index: 60; padding: 10px 14px; border-radius: 10px; background: var(--text); color: var(--bg); font-weight: 600; text-align: center; }
+#toast.fehler { background: var(--fehler); color: #fff; }
+#toast.ok { background: var(--gruen); color: #fff; }
+
+/* Druck */
+.druckleiste { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+.druck h1 { font-size: 1.2rem; }
+.druck .tag { min-height: 64px; cursor: default; }
+.druckliste th, .druckliste td { padding: 3px 6px; font-size: .82rem; }
+@media print {
+  @page { size: A4; margin: 12mm; }
+  body { background: #fff; color: #000; font-size: 11pt; }
+  header.kopf, nav.tabs, .noprint, #toast, #modal { display: none !important; }
+  main { padding: 0; max-width: none; }
+  .tag, .mt, .probe, .wer, th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .tag { break-inside: avoid; }
+  tr, .mini { break-inside: avoid; }
+  .seitenumbruch { break-before: page; }
+  a { color: inherit; text-decoration: none; }
+}
+
+</style>
+</head>
+<body>
+<div id="app" aria-live="polite"><p class="laden">Betreuungsplaner wird geladen …</p></div>
+<div id="modal" hidden></div>
+<div id="toast" role="status" hidden></div>
+<noscript>Der Betreuungsplaner braucht JavaScript.</noscript>
+<!-- Build 14.11.2026 06:09 -->
+<script>
+const __m = {}; const __f = {};
+function __r(id) { if (!(id in __m)) __m[id] = __f[id](); return __m[id]; }
+__f['engine/zeit.js'] = function () {
+// Lokale Zeit Europe/Berlin als "Wanduhrzeit" ohne Zeitzone.
+// Ein Zeitpunkt ist eine ganze Zahl: Minuten seit 1970-01-01T00:00 (naiv, ohne DST).
+// Damit gilt automatisch die Lastenheft-Regel "Kalenderstunden": Der Tag der
+// Sommer- und Winterzeitumstellung zählt mit 24 Stunden. Schaltjahre deckt Date.UTC ab.
+
+const MIN_PRO_TAG = 1440;
+
+function parse(s) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/.exec(s);
+  if (!m) throw new Error(`Ungültiger Zeitpunkt: ${s}`);
+  const [, y, mo, d, h = '0', mi = '0'] = m;
+  return Date.UTC(+y, +mo - 1, +d, +h, +mi) / 60000;
+}
+
+function format(t) {
+  const d = new Date(t * 60000);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}T${p(d.getUTCHours())}:${p(d.getUTCMinutes())}`;
+}
+
+function formatDatum(t) {
+  return format(t).slice(0, 10);
+}
+
+/** Tagesbeginn (00:00) des Zeitpunkts. */
+function tag(t) {
+  return Math.floor(t / MIN_PRO_TAG) * MIN_PRO_TAG;
+}
+
+/** Datum (00:00) plus Uhrzeit "HH:MM". */
+function mitUhrzeit(tagT, hhmm) {
+  const [h, m] = hhmm.split(':').map(Number);
+  return tag(tagT) + h * 60 + m;
+}
+
+function plusTage(t, n) {
+  return t + n * MIN_PRO_TAG;
+}
+
+function plusStunden(t, n) {
+  return t + n * 60;
+}
+
+/** 0 = Sonntag … 6 = Samstag */
+function wochentag(t) {
+  return new Date(t * 60000).getUTCDay();
+}
+
+/** Montag (00:00) der Woche, die t enthält (Woche Mo–So). */
+function montagDerWoche(t) {
+  return plusTage(tag(t), -((wochentag(t) + 6) % 7));
+}
+
+function jahr(t) {
+  return new Date(t * 60000).getUTCFullYear();
+}
+
+function monat(t) {
+  return new Date(t * 60000).getUTCMonth() + 1;
+}
+
+function datum(y, m, d, hhmm = '00:00') {
+  const [h, mi] = hhmm.split(':').map(Number);
+  return Date.UTC(y, m - 1, d, h, mi) / 60000;
+}
+
+const MINUTEN_PRO_TAG = MIN_PRO_TAG;
+
+/**
+ * true, wenn die Wanduhrzeit in Europe/Berlin nicht existiert
+ * (Sommerzeitbeginn: letzter Sonntag im März, 02:00–02:59).
+ */
+function istZeitluecke(t) {
+  const y = jahr(t);
+  const ende31 = datum(y, 3, 31);
+  const sonntag = plusTage(ende31, -wochentag(ende31));
+  return t >= sonntag + 120 && t < sonntag + 180;
+}
+
+/**
+ * Wandelt einen echten Zeitpunkt (JS Date) in lokale Wanduhrzeit Europe/Berlin um.
+ * Wird nur an den Rändern gebraucht (z. B. "jetzt" für Verfall).
+ */
+function ausDate(date) {
+  const teile = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Berlin', year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+  }).formatToParts(date);
+  const w = Object.fromEntries(teile.map((p) => [p.type, p.value]));
+  return datum(+w.year, +w.month, +w.day, `${w.hour}:${w.minute}`);
+}
+
+return { parse, format, formatDatum, tag, mitUhrzeit, plusTage, plusStunden, wochentag, montagDerWoche, jahr, monat, datum, MINUTEN_PRO_TAG, istZeitluecke, ausDate };
+};
+__f['engine/engine.js'] = function () {
+// Regel-Engine: reine Funktion ohne Oberfläche und ohne Datenbank.
+// Eingabe: Regeln (Versionen mit Stichtag), Ferientermine, bestätigte Anträge, Zeitraum.
+// Ausgabe: Zuständigkeitsintervalle, Übergaben, Bilanz.
+// Priorität: bestätigte Ausnahme > Ferienregel > Grundrhythmus (Lastenheft, Regelwerk).
+// Alle Intervalle halboffen [von, bis), Zeit = lokale Wanduhrzeit (siehe zeit.js).
+
+const Z = __r('engine/zeit.js');
+
+const ELTERN = ['papa', 'mama'];
+const anderer = (p) => (p === 'papa' ? 'mama' : 'papa');
+
+const GRUND_RHYTHMUS = 'Grundrhythmus';
+// "aenderung" ist eine bestätigte Änderung einer Ausnahme und wirkt wie eine Ausnahme;
+// ihr Grund-Text richtet sich nach der Art der ursprünglichen Ausnahme (ausnahmeArt).
+const AUSNAHME_ARTEN = new Set(['ausnahme', 'ausnahme_mit_ausgleich', 'weihnachtsbesuch', 'aenderung']);
+const AUSNAHME_GRUND = {
+  ausnahme: 'Ausnahme',
+  ausnahme_mit_ausgleich: 'Ausnahme',
+  weihnachtsbesuch: 'Ausnahme: Weihnachtsbesuch',
+};
+
+// ---------------------------------------------------------------------------
+// Regelversionen
+
+/** Normalisiert Regeln zu einer nach Stichtag sortierten Liste mit Minutenwerten. */
+function regelVersionen(regeln) {
+  const liste = (Array.isArray(regeln) ? regeln : [regeln])
+    .map((r) => ({ ...r, _ab: Z.parse(r.gueltigAb) }))
+    .sort((a, b) => a._ab - b._ab);
+  if (!liste.length) throw new Error('Keine Regeln angegeben');
+  return liste;
+}
+
+/** Version, die zum Zeitpunkt t gilt (vor dem ersten Stichtag gilt die erste Version). */
+function versionZu(versionen, t) {
+  let v = versionen[0];
+  for (const x of versionen) if (x._ab <= t) v = x;
+  return v;
+}
+
+// ---------------------------------------------------------------------------
+// Grundrhythmus
+
+function rhythmusBasis(r) {
+  return { ref: Z.parse(r.rhythmus.referenzBeginn), zyklus: r.rhythmus.zyklusTage * Z.MINUTEN_PRO_TAG, bei: r.rhythmus.referenzBei };
+}
+
+/** Zuständig laut reinem Grundrhythmus zum Zeitpunkt t (ohne Ferien, ohne Unterdrückung). */
+function rhythmusBei(r, t) {
+  const { ref, zyklus, bei } = rhythmusBasis(r);
+  const k = Math.floor((t - ref) / zyklus);
+  return ((k % 2) + 2) % 2 === 0 ? bei : anderer(bei);
+}
+
+/** Alle Rhythmuswechsel im Bereich [von, bis). */
+function rhythmusWechsel(r, von, bis) {
+  const { ref, zyklus } = rhythmusBasis(r);
+  const out = [];
+  for (let t = ref + Math.ceil((von - ref) / zyklus) * zyklus; t < bis; t += zyklus) out.push(t);
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Ferientermine
+
+/** Regel 10: nächster Unterrichtstag nach dem letzten Ferientag (ohne Wochenende und 06.01.). */
+function ersterSchultag(letzterFerientag) {
+  let t = Z.plusTage(Z.parse(letzterFerientag), 1);
+  for (;;) {
+    const wt = Z.wochentag(t);
+    const d = Z.formatDatum(t).slice(5);
+    if (wt !== 0 && wt !== 6 && d !== '01-06') return t;
+    t = Z.plusTage(t, 1);
+  }
+}
+
+function schulbeginnTag(f) {
+  return f.schulbeginn ? Z.parse(f.schulbeginn) : ersterSchultag(f.letzter);
+}
+
+// ---------------------------------------------------------------------------
+// Rotationen
+
+function sommerErsteHaelfte(r, jahr) {
+  const { jahr: anker, ersteHaelfteBei } = r.sommerrotation;
+  return (jahr - anker) % 2 === 0 ? ersteHaelfteBei : anderer(ersteHaelfteBei);
+}
+
+function weihnachtenBei(r, jahr) {
+  const { jahr: anker, bei } = r.weihnachtsrotation;
+  return (jahr - anker) % 2 === 0 ? bei : anderer(bei);
+}
+
+// ---------------------------------------------------------------------------
+// Ferienblöcke einer Regelversion
+
+/**
+ * Erzeugt alle Ferienblöcke aus den Ferienterminen für eine Regelversion.
+ * Jeder Block: { von, bis, bei, abschnitt, planjahr, rhythmus (Stand Blockbeginn) }.
+ */
+function ferienBloecke(r, ferien) {
+  const bloecke = [];
+  const add = (von, bis, bei, abschnitt, planjahr) => {
+    if (bis > von) bloecke.push({ von, bis, bei, abschnitt, planjahr, rhythmus: rhythmusBei(r, von) });
+  };
+  const fh = r.fruehjahrHerbst;
+  const op = r.osternPfingsten;
+
+  for (const f of ferien) {
+    const erster = Z.parse(f.erster);
+    const pj = Z.jahr(erster);
+    const montag = Z.montagDerWoche(erster);
+    const schule = Z.mitUhrzeit(schulbeginnTag(f), r.schulbeginn);
+
+    switch (f.art) {
+      case 'fruehjahr':
+      case 'herbst': {
+        // Regel 2: Herbst = erste Sommerhälfte, Frühjahr = zweite Sommerhälfte
+        const h1 = sommerErsteHaelfte(r, pj);
+        const bei = f.art === 'herbst' ? h1 : anderer(h1);
+        const name = f.art === 'herbst' ? 'Herbst' : 'Frühjahr';
+        // Regel 3: Sonntag vor der Ferienwoche bis Freitag der Ferienwoche
+        const von = Z.mitUhrzeit(Z.plusTage(montag, -1), fh.beginnZeit);
+        const bis = Z.mitUhrzeit(Z.plusTage(montag, 4), fh.endeZeit);
+        add(von, bis, bei, name, pj);
+        // Regel 4: Werktagstausch, falls der Block laut Rhythmus dem anderen gehört
+        const laut = rhythmusBei(r, von);
+        if (laut !== bei) add(Z.plusTage(von, 7), Z.plusTage(bis, 7), laut, `Ausgleich ${name}`, pj);
+        break;
+      }
+      case 'ostern':
+      case 'pfingsten': {
+        // Regel 5
+        const name = f.art === 'ostern' ? 'Ostern' : 'Pfingsten';
+        const start = Z.mitUhrzeit(Z.plusTage(montag, -3), op.startZeit);
+        const wechsel = Z.mitUhrzeit(Z.plusTage(montag, 6), op.wechselZeit);
+        const w1 = rhythmusBei(r, start);
+        add(start, wechsel, w1, `${name} – Woche 1`, pj);
+        add(wechsel, schule, anderer(w1), `${name} – Woche 2`, pj);
+        break;
+      }
+      case 'sommer': {
+        // Regel 6: Hortwoche im Rhythmus, danach Sonderbetreuung, rechnerisch halbiert
+        const s = r.sommer;
+        const start = Z.mitUhrzeit(Z.plusTage(erster, s.hortwocheTage), s.sonderbetreuungAb);
+        const mitte = Z.mitUhrzeit(start + Math.floor((schule - start) / 2), s.mitteUebergabe);
+        const h1 = sommerErsteHaelfte(r, pj);
+        add(start, mitte, h1, 'Sommer – Hälfte 1', pj);
+        add(mitte, schule, anderer(h1), 'Sommer – Hälfte 2', pj);
+        break;
+      }
+      case 'weihnachten': {
+        // Regeln 7 und 8: fester Weihnachtsblock, danach Neujahr bis Schulbeginn
+        const w = r.weihnachten;
+        const von = Z.datum(pj, w.beginn.monat, w.beginn.tag, w.beginn.zeit);
+        const bis = Z.datum(pj, w.ende.monat, w.ende.tag, w.ende.zeit);
+        const bei = weihnachtenBei(r, pj);
+        add(von, bis, bei, 'Weihnachten', pj);
+        add(bis, schule, anderer(bei), 'Neujahr ins Folgejahr', pj);
+        break;
+      }
+      default:
+        throw new Error(`Unbekannte Ferienart: ${f.art}`);
+    }
+  }
+  return bloecke.sort((a, b) => a.von - b.von);
+}
+
+/** Regel 9: Rhythmuswechsel in den N Stunden vor Beginn eines Weihnachtsblocks entfallen. */
+function unterdrueckteWechsel(r, bloecke) {
+  const set = new Set();
+  const fenster = r.unterdrueckungVorWeihnachtenStunden * 60;
+  for (const b of bloecke) {
+    if (b.abschnitt !== 'Weihnachten') continue;
+    for (const t of rhythmusWechsel(r, b.von - fenster, b.von)) set.add(t);
+  }
+  return set;
+}
+
+// ---------------------------------------------------------------------------
+// Ausnahmen aus bestätigten Anträgen
+
+function ausnahmenAus(antraege = []) {
+  const out = [];
+  for (const a of antraege) {
+    if (a.status !== 'bestaetigt' || !AUSNAHME_ARTEN.has(a.art)) continue;
+    const art = a.art === 'aenderung' ? (a.ausnahmeArt ?? 'ausnahme') : a.art;
+    out.push({ von: Z.parse(a.von), bis: Z.parse(a.bis), bei: a.bei, grund: AUSNAHME_GRUND[art], antragId: a.id });
+    if (a.ausgleich) {
+      out.push({
+        von: Z.parse(a.ausgleich.von), bis: Z.parse(a.ausgleich.bis),
+        bei: a.ausgleich.bei ?? anderer(a.bei), grund: 'Ausgleich', antragId: a.id,
+      });
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Hauptfunktion
+
+/**
+ * @param {object} eingabe
+ * @param {object|object[]} eingabe.regeln  Regelversion(en) mit gueltigAb
+ * @param {object[]} eingabe.ferien          Ferientermine {schuljahr, art, erster, letzter, schulbeginn?}
+ * @param {object[]} [eingabe.antraege]      Anträge; nur status "bestaetigt" wirkt
+ * @param {{von:string, bis:string}} eingabe.zeitraum
+ */
+function berechnePlan({ regeln, ferien, antraege = [], zeitraum }) {
+  const versionen = regelVersionen(regeln);
+  const von = Z.parse(zeitraum.von);
+  const bis = Z.parse(zeitraum.bis);
+  if (bis <= von) throw new Error('Zeitraum: bis muss nach von liegen');
+
+  // Pro Version: Blöcke und unterdrückte Wechsel
+  const kontext = new Map();
+  for (const v of versionen) {
+    const bloecke = ferienBloecke(v, ferien);
+    kontext.set(v, { bloecke, unterdrueckt: unterdrueckteWechsel(v, bloecke) });
+  }
+  const ausnahmen = ausnahmenAus(antraege);
+  const vorlaeufigAb = ferienAbgedecktBis(versionen, ferien);
+
+  const zustand = (t) => {
+    const a = ausnahmen.find((x) => x.von <= t && t < x.bis);
+    if (a) return { bei: a.bei, grund: a.grund, quelle: 'ausnahme', antragId: a.antragId };
+    const v = versionZu(versionen, t);
+    const { bloecke, unterdrueckt } = kontext.get(v);
+    const b = bloecke.find((x) => x.von <= t && t < x.bis);
+    if (b) return { bei: b.bei, grund: b.abschnitt, quelle: 'ferien' };
+    return { bei: rhythmusEffektiv(v, unterdrueckt, t), grund: GRUND_RHYTHMUS, quelle: 'rhythmus' };
+  };
+
+  // Elementare Grenzen sammeln
+  const grenzen = new Set([von, bis]);
+  if (vorlaeufigAb !== null && vorlaeufigAb > von && vorlaeufigAb < bis) grenzen.add(vorlaeufigAb);
+  for (const v of versionen) {
+    if (v._ab > von && v._ab < bis) grenzen.add(v._ab);
+    for (const t of rhythmusWechsel(v, von, bis)) grenzen.add(t);
+    for (const b of kontext.get(v).bloecke) {
+      if (b.von > von && b.von < bis) grenzen.add(b.von);
+      if (b.bis > von && b.bis < bis) grenzen.add(b.bis);
+    }
+  }
+  for (const a of ausnahmen) {
+    if (a.von > von && a.von < bis) grenzen.add(a.von);
+    if (a.bis > von && a.bis < bis) grenzen.add(a.bis);
+  }
+  const punkte = [...grenzen].sort((a, b) => a - b);
+
+  // Segmente auswerten und zusammenfassen
+  const intervalle = [];
+  for (let i = 0; i < punkte.length - 1; i++) {
+    const z = zustand(punkte[i]);
+    z.vorlaeufig = vorlaeufigAb === null || punkte[i] >= vorlaeufigAb;
+    const letztes = intervalle[intervalle.length - 1];
+    if (letztes && letztes.bei === z.bei && letztes.grund === z.grund
+      && letztes.antragId === z.antragId && letztes.vorlaeufig === z.vorlaeufig) {
+      letztes.bis = punkte[i + 1];
+    } else {
+      intervalle.push({ von: punkte[i], bis: punkte[i + 1], ...z });
+    }
+  }
+
+  // Übergaben: jeder Wechsel der Zuständigkeit, auch genau zu Beginn des Zeitraums
+  const uebergaben = [];
+  let vorher = zustand(von - 1).bei;
+  for (const iv of intervalle) {
+    if (iv.bei !== vorher) uebergaben.push({ zeit: iv.von, von: vorher, an: iv.bei, grund: iv.grund });
+    vorher = iv.bei;
+  }
+
+  return {
+    intervalle: intervalle.map((iv) => ({ ...iv, von: Z.format(iv.von), bis: Z.format(iv.bis) })),
+    uebergaben: uebergaben.map((u) => ({ ...u, zeit: Z.format(u.zeit) })),
+    bilanz: bilanz(intervalle, von, bis),
+    vorlaeufigAb: vorlaeufigAb === null ? null : Z.format(vorlaeufigAb),
+    _intern: { intervalle },
+  };
+}
+
+/**
+ * Ende der Abdeckung durch Ferientermine: der späteste bekannte Schulbeginn.
+ * Ab dort gilt nur der Grundrhythmus, markiert als "vorläufig – Ferientermine fehlen".
+ * null = gar keine Ferientermine, alles vorläufig.
+ */
+function ferienAbgedecktBis(regeln, ferien) {
+  const versionen = regelVersionen(regeln);
+  let max = null;
+  for (const f of ferien) {
+    const tagT = schulbeginnTag(f);
+    const t = Z.mitUhrzeit(tagT, versionZu(versionen, tagT).schulbeginn);
+    if (max === null || t > max) max = t;
+  }
+  return max;
+}
+
+function rhythmusEffektiv(r, unterdrueckt, t) {
+  // Liegt t hinter einem entfallenen Wechsel (bis zum nächsten Wechsel), gilt der vorherige Stand.
+  const { ref, zyklus } = rhythmusBasis(r);
+  const letzterWechsel = ref + Math.floor((t - ref) / zyklus) * zyklus;
+  if (unterdrueckt.has(letzterWechsel)) return rhythmusBei(r, letzterWechsel - 1);
+  return rhythmusBei(r, t);
+}
+
+// ---------------------------------------------------------------------------
+// Bilanz
+
+/**
+ * Nächte: zählen am Datum ihres Beginns für den, der um 23:59:59 zuständig ist.
+ * Stunden: Summe der Intervalle in Kalenderstunden.
+ * @param intervalle Intervalle mit Minutenwerten (von, bis, bei)
+ */
+function bilanz(intervalle, von, bis) {
+  const stundenMin = { papa: 0, mama: 0 };
+  for (const iv of intervalle) {
+    const a = Math.max(iv.von, von);
+    const b = Math.min(iv.bis, bis);
+    if (b > a) stundenMin[iv.bei] += b - a;
+  }
+  const naechte = { papa: 0, mama: 0 };
+  let i = 0;
+  // erste Nacht: Datum, dessen 23:59 in [von, bis) liegt
+  let n = Z.tag(von) + 1439;
+  if (n < von) n += Z.MINUTEN_PRO_TAG;
+  for (; n < bis; n += Z.MINUTEN_PRO_TAG) {
+    while (i < intervalle.length && intervalle[i].bis <= n) i++;
+    const iv = intervalle[i];
+    if (iv && iv.von <= n) naechte[iv.bei]++;
+  }
+  return {
+    von: Z.format(von),
+    bis: Z.format(bis),
+    naechte,
+    stunden: { papa: stundenMin.papa / 60, mama: stundenMin.mama / 60 },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Betreuungsjahre und Ferienblock-Übersicht
+
+/**
+ * Betreuungsjahre: Schulbeginn im Januar bis Schulbeginn im folgenden Januar,
+ * das erste beginnt frühestens mit dem Planbeginn.
+ */
+function betreuungsjahre(regeln, ferien) {
+  const versionen = regelVersionen(regeln);
+  const planbeginn = Z.parse(versionen[0].planbeginn);
+  const starts = ferien
+    .filter((f) => f.art === 'weihnachten')
+    .map((f) => Z.mitUhrzeit(schulbeginnTag(f), versionZu(versionen, schulbeginnTag(f)).schulbeginn))
+    .sort((a, b) => a - b);
+  const jahre = [];
+  for (let i = 0; i < starts.length - 1; i++) {
+    const von = Math.max(starts[i], planbeginn);
+    const bis = starts[i + 1];
+    if (bis <= planbeginn) continue;
+    jahre.push({ jahr: Z.jahr(starts[i]), von: Z.format(von), bis: Z.format(bis) });
+  }
+  return jahre;
+}
+
+/** Bilanz je Betreuungsjahr. */
+function bilanzJeBetreuungsjahr({ regeln, ferien, antraege = [] }) {
+  return betreuungsjahre(regeln, ferien).map((bj) => {
+    const plan = berechnePlan({ regeln, ferien, antraege, zeitraum: bj });
+    return { jahr: bj.jahr, ...plan.bilanz };
+  });
+}
+
+/**
+ * Ferienblöcke eines Planjahres (Kalenderjahr) wie in der Excel:
+ * Der Neujahrsblock aus dem Vorjahr beginnt am 01.01. 00:00.
+ */
+function ferienbloeckeImJahr(regeln, ferien, jahr) {
+  const versionen = regelVersionen(regeln);
+  const jahrBeginn = Z.datum(jahr, 1, 1);
+  const jahrEnde = Z.datum(jahr + 1, 1, 1);
+  const out = [];
+  for (const v of versionen) {
+    for (const b of ferienBloecke(v, ferien)) {
+      if (versionZu(versionen, b.von) !== v) continue;
+      if (b.von >= jahrBeginn && b.von < jahrEnde) {
+        out.push({ abschnitt: b.abschnitt, von: b.von, bis: b.bis, bei: b.bei, rhythmus: b.rhythmus });
+      } else if (b.abschnitt === 'Neujahr ins Folgejahr' && b.von < jahrBeginn && b.bis > jahrBeginn) {
+        out.push({ abschnitt: 'Neujahr aus Vorjahr', von: jahrBeginn, bis: b.bis, bei: b.bei, rhythmus: rhythmusBei(v, jahrBeginn) });
+      }
+    }
+  }
+  return out
+    .sort((a, b) => a.von - b.von)
+    .map((b) => ({ abschnitt: b.abschnitt, von: Z.format(b.von), bis: Z.format(b.bis), bei: b.bei, rhythmus_bei_beginn: b.rhythmus }));
+}
+
+return { ELTERN, anderer, regelVersionen, rhythmusBei, ersterSchultag, ferienBloecke, ausnahmenAus, berechnePlan, ferienAbgedecktBis, bilanz, betreuungsjahre, bilanzJeBetreuungsjahr, ferienbloeckeImJahr };
+};
+__f['data/standardregeln.js'] = function () {
+// Regelparameter ab Planbeginn (Lastenheft, Abschnitt Regelwerk > Parameter).
+// Das sind Ausgangsdaten, keine Konstanten der Engine: Die Engine liest alles aus diesem Objekt.
+
+const STANDARD_REGELN = {
+  gueltigAb: '2027-01-11T08:00',
+  planbeginn: '2027-01-11T08:00',
+  rhythmus: {
+    // 7/7: Zuständigkeit wechselt alle 7 Tage zum Zeitpunkt der Referenzwoche (Fr 15:00)
+    zyklusTage: 7,
+    referenzBeginn: '2027-01-08T15:00',
+    referenzBei: 'papa',
+  },
+  schulbeginn: '08:00',
+  sommerrotation: { jahr: 2027, ersteHaelfteBei: 'mama' },
+  weihnachtsrotation: { jahr: 2027, bei: 'mama' },
+  fruehjahrHerbst: { beginnZeit: '18:00', endeZeit: '15:00' },
+  osternPfingsten: { startZeit: '15:00', wechselZeit: '10:00' },
+  sommer: { hortwocheTage: 7, sonderbetreuungAb: '15:00', mitteUebergabe: '15:00' },
+  weihnachten: {
+    beginn: { monat: 12, tag: 24, zeit: '17:00' },
+    ende: { monat: 12, tag: 31, zeit: '10:00' },
+  },
+  unterdrueckungVorWeihnachtenStunden: 3,
+};
+
+return { STANDARD_REGELN };
+};
+__f['data/ferien-bayern.js'] = function () {
+// Amtliche bayerische Ferientermine laut Lastenheft (Quelle: BayMBl. 2022 Nr. 747, wie in der Excel).
+// Nur die im Lastenheft genannten Termine, bis zum Schulbeginn im Januar 2030.
+// schulbeginn fehlt bewusst: wird nach Regel 10 berechnet (nur bei Abweichung überschreiben).
+
+const FERIEN_BAYERN = [
+  { schuljahr: '2026/27', art: 'weihnachten', erster: '2026-12-24', letzter: '2027-01-08' },
+  { schuljahr: '2026/27', art: 'fruehjahr', erster: '2027-02-08', letzter: '2027-02-12' },
+  { schuljahr: '2026/27', art: 'ostern', erster: '2027-03-22', letzter: '2027-04-02' },
+  { schuljahr: '2026/27', art: 'pfingsten', erster: '2027-05-18', letzter: '2027-05-28' },
+  { schuljahr: '2026/27', art: 'sommer', erster: '2027-08-02', letzter: '2027-09-13' },
+  { schuljahr: '2027/28', art: 'herbst', erster: '2027-11-02', letzter: '2027-11-05' },
+  { schuljahr: '2027/28', art: 'weihnachten', erster: '2027-12-24', letzter: '2028-01-07' },
+  { schuljahr: '2027/28', art: 'fruehjahr', erster: '2028-02-28', letzter: '2028-03-03' },
+  { schuljahr: '2027/28', art: 'ostern', erster: '2028-04-10', letzter: '2028-04-21' },
+  { schuljahr: '2027/28', art: 'pfingsten', erster: '2028-06-06', letzter: '2028-06-16' },
+  { schuljahr: '2027/28', art: 'sommer', erster: '2028-07-31', letzter: '2028-09-11' },
+  { schuljahr: '2028/29', art: 'herbst', erster: '2028-10-30', letzter: '2028-11-03' },
+  { schuljahr: '2028/29', art: 'weihnachten', erster: '2028-12-23', letzter: '2029-01-05' },
+  { schuljahr: '2028/29', art: 'fruehjahr', erster: '2029-02-12', letzter: '2029-02-16' },
+  { schuljahr: '2028/29', art: 'ostern', erster: '2029-03-26', letzter: '2029-04-06' },
+  { schuljahr: '2028/29', art: 'pfingsten', erster: '2029-05-22', letzter: '2029-06-01' },
+  { schuljahr: '2028/29', art: 'sommer', erster: '2029-07-30', letzter: '2029-09-10' },
+  { schuljahr: '2029/30', art: 'herbst', erster: '2029-10-29', letzter: '2029-11-02' },
+  { schuljahr: '2029/30', art: 'weihnachten', erster: '2029-12-24', letzter: '2030-01-04' },
+];
+
+return { FERIEN_BAYERN };
+};
+__f['app/dienst.js'] = function () {
+// Fachlogik: Anträge, Rechte, Ferientermine, Verlauf.
+// Arbeitet nur über die Speicher-Schnittstelle (src/speicher/schnittstelle.js) und die Regel-Engine.
+
+const Z = __r('engine/zeit.js');
+const { berechnePlan, anderer, ELTERN, ersterSchultag } = __r('engine/engine.js');
+const { STANDARD_REGELN } = __r('data/standardregeln.js');
+const { FERIEN_BAYERN } = __r('data/ferien-bayern.js');
+
+class FachFehler extends Error {}
+
+const MELDUNG = {
+  NICHT_ANGEMELDET: 'Bitte melde dich an, um den Plan zu sehen.',
+  NICHT_EINGERICHTET: 'Der Plan ist noch nicht eingerichtet.',
+  KEINE_BERECHTIGUNG: 'Dein Konto ist für diesen Plan nicht freigeschaltet.',
+  UEBERLAPPUNG: 'Für diesen Zeitraum ist bereits ein Antrag offen',
+  KONFLIKT: 'Der Zeitraum überschneidet eine bestätigte Ausnahme. Bitte als Änderung dieser Ausnahme beantragen.',
+  REGEL_OFFEN: 'Es ist bereits eine Regeländerung offen',
+  ZEITLUECKE: 'Diese Uhrzeit gibt es wegen der Zeitumstellung nicht.',
+  RASTER: 'Uhrzeiten nur in 15-Minuten-Schritten',
+  NICHT_OFFEN: 'Der Antrag ist nicht mehr offen',
+  EIGENER: 'Den eigenen Antrag kann nur der andere Elternteil bestätigen oder ablehnen',
+  NUR_ANTRAGSTELLER: 'Nur wer den Antrag gestellt hat, kann ihn zurückziehen',
+  KOMMENTAR: 'Eine Ablehnung braucht einen Kommentar',
+  BEGRUENDUNG: 'Bitte eine Begründung angeben',
+  NUR_PAPA_FERIEN: 'Nur Papa kann Ferientermine pflegen',
+  NUR_PAPA_EINRICHTEN: 'Nur der Besitzer kann den Plan einrichten',
+  STICHTAG: 'Der Stichtag muss in der Zukunft liegen',
+  NUR_PAPA_SICHERUNG: 'Nur Papa kann eine Sicherung einspielen',
+  SICHERUNG_UNGUELTIG: 'Das ist keine gültige Sicherungsdatei des Betreuungsplaners',
+};
+
+const ANTRAGSARTEN = ['ausnahme', 'ausnahme_mit_ausgleich', 'weihnachtsbesuch', 'storno', 'aenderung', 'regelaenderung'];
+const AUSNAHME_ARTEN = new Set(['ausnahme', 'ausnahme_mit_ausgleich', 'weihnachtsbesuch', 'aenderung']);
+const FERIENARTEN = ['weihnachten', 'fruehjahr', 'ostern', 'pfingsten', 'sommer', 'herbst'];
+const SYSTEM = 'system';
+
+// ---------------------------------------------------------------------------
+// reine Hilfsfunktionen
+
+const istObjekt = (x) => x && typeof x === 'object' && !Array.isArray(x);
+
+function tiefMischen(basis, patch) {
+  const out = { ...basis };
+  for (const [k, v] of Object.entries(patch)) out[k] = istObjekt(v) && istObjekt(basis[k]) ? tiefMischen(basis[k], v) : v;
+  return out;
+}
+
+function zeitpunkt(s, feld) {
+  let t;
+  try {
+    t = Z.parse(s);
+  } catch {
+    throw new FachFehler(`${feld}: ungültige Zeitangabe`);
+  }
+  if (t % 15 !== 0) throw new FachFehler(MELDUNG.RASTER);
+  if (Z.istZeitluecke(t)) throw new FachFehler(MELDUNG.ZEITLUECKE);
+  return t;
+}
+
+function zeitraum(von, bis, feld = 'Zeitraum') {
+  const a = zeitpunkt(von, `${feld} von`);
+  const b = zeitpunkt(bis, `${feld} bis`);
+  if (b <= a) throw new FachFehler(`${feld}: Ende muss nach dem Beginn liegen`);
+  return { von: a, bis: b };
+}
+
+const ueberschneiden = (a, b) => a.von < b.bis && b.von < a.bis;
+
+/** Zeiträume (Minuten), die ein Antrag berührt; für Überlappung und Verfall. */
+function zeitraeumeVon(antrag, alle) {
+  if (antrag.art === 'regelaenderung') return [];
+  const eigene = [{ von: Z.parse(antrag.von), bis: Z.parse(antrag.bis) }];
+  if (antrag.ausgleich) eigene.push({ von: Z.parse(antrag.ausgleich.von), bis: Z.parse(antrag.ausgleich.bis) });
+  if (antrag.art === 'storno' || antrag.art === 'aenderung') {
+    const ziel = alle.find((x) => x.id === antrag.bezug?.ausnahme);
+    if (ziel) eigene.push(...zeitraeumeVon(ziel, alle));
+  }
+  return eigene;
+}
+
+/** Stundendifferenz zwischen Ausnahme und Ausgleich ("Ausgleich 4 h kürzer"). */
+function ausgleichDifferenz(antrag) {
+  const dauer = (v, b) => (Z.parse(b) - Z.parse(v)) / 60;
+  const stunden = dauer(antrag.ausgleich.von, antrag.ausgleich.bis) - dauer(antrag.von, antrag.bis);
+  const zahl = (x) => String(Math.abs(x)).replace('.', ',');
+  const text = stunden === 0 ? 'Ausgleich gleich lang'
+    : `Ausgleich ${zahl(stunden)} h ${stunden < 0 ? 'kürzer' : 'länger'}`;
+  return { stunden, text };
+}
+
+function zufallsId() {
+  return `a-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Dienst
+
+/**
+ * @param {object} o
+ * @param {object} o.speicher  Adapter gemäß docs/adapter.md
+ * @param {() => number} [o.jetzt]  aktuelle lokale Zeit (Minuten, siehe zeit.js)
+ * @param {() => string} [o.neueId]
+ */
+function erstelleDienst({ speicher, jetzt = () => Z.ausDate(new Date()), neueId = zufallsId }) {
+  const jetztText = () => Z.format(jetzt());
+
+  async function protokoll(kontoId, ereignis, { bezug = null, alt = null, neu = null } = {}) {
+    await speicher.anhaengen('verlauf', { zeit: jetztText(), erstelltMs: Date.now(), kontoId, ereignis, bezug, alt, neu });
+  }
+
+  async function angemeldet() {
+    const nutzer = await speicher.aktuellerNutzer();
+    if (!nutzer?.kontoId) throw new FachFehler(MELDUNG.NICHT_ANGEMELDET);
+    const rollen = await speicher.lesen('config', 'rollen');
+    if (!rollen) throw new FachFehler(MELDUNG.NICHT_EINGERICHTET);
+    let rolle = nutzer.kontoId === rollen.papa ? 'papa' : nutzer.kontoId === rollen.mama ? 'mama' : null;
+    // Das erste Nicht-Besitzer-Konto, das den Plan öffnet, wird automatisch Mama.
+    if (!rolle && !rollen.mama && !nutzer.istBesitzer) {
+      rollen.mama = nutzer.kontoId;
+      await speicher.schreiben('config', 'rollen', { papa: rollen.papa, mama: rollen.mama });
+      await protokoll(nutzer.kontoId, 'mama_verbunden', { neu: { mama: nutzer.kontoId } });
+      rolle = 'mama';
+    }
+    if (!rolle) throw new FachFehler(MELDUNG.KEINE_BERECHTIGUNG);
+    return { kontoId: nutzer.kontoId, rolle, rollen };
+  }
+
+  async function regelVersionen() {
+    const liste = await speicher.liste('regeln');
+    return liste
+      .map(({ id, antragId, ...r }) => r)
+      .sort((a, b) => (a.gueltigAb < b.gueltigAb ? -1 : 1));
+  }
+
+  async function ferien() {
+    return (await speicher.liste('ferien')).map(({ id, ...f }) => f);
+  }
+
+  // ---- Validierung neuer Anträge ------------------------------------------
+
+  async function pruefeAusnahmeInhalt(e, art, versionen) {
+    const zr = zeitraum(e.von, e.bis);
+    if (!ELTERN.includes(e.bei)) throw new FachFehler('Bitte angeben, bei wem Lotte ist');
+    const begruendung = (e.begruendung ?? '').trim();
+    if (!begruendung) throw new FachFehler(MELDUNG.BEGRUENDUNG);
+    const doc = { von: Z.format(zr.von), bis: Z.format(zr.bis), bei: e.bei, begruendung, ausgleich: null };
+
+    if (art === 'ausnahme_mit_ausgleich') {
+      if (!e.ausgleich) throw new FachFehler('Bitte den Ausgleichszeitraum angeben');
+      const ag = zeitraum(e.ausgleich.von, e.ausgleich.bis, 'Ausgleich');
+      if (ueberschneiden(ag, zr)) throw new FachFehler('Ausgleich darf die Ausnahme nicht überschneiden');
+      doc.ausgleich = { von: Z.format(ag.von), bis: Z.format(ag.bis), bei: anderer(e.bei) };
+    }
+
+    if (art === 'weihnachtsbesuch') {
+      const y = Z.jahr(zr.von);
+      const tagNr = Z.formatDatum(zr.von).slice(5);
+      if (tagNr !== '12-25' && tagNr !== '12-26') throw new FachFehler('Der Weihnachtsbesuch beginnt am 25. oder 26.12.');
+      const r = versionen.filter((v) => v.gueltigAb <= Z.format(zr.von)).at(-1) ?? versionen[0];
+      const ende = Z.datum(y, r.weihnachten.ende.monat, r.weihnachten.ende.tag, r.weihnachten.ende.zeit);
+      if (zr.bis > ende) throw new FachFehler(`Der Weihnachtsbesuch endet spätestens am ${Z.format(ende).slice(8, 10)}.12. ${r.weihnachten.ende.zeit}`);
+    }
+    return doc;
+  }
+
+  async function baueAntrag(e, ich, { ausser = null } = {}) {
+    if (!ANTRAGSARTEN.includes(e.art)) throw new FachFehler(`Unbekannte Antragsart: ${e.art}`);
+    const alle = await speicher.liste('antraege');
+    const versionen = await regelVersionen();
+    const doc = {
+      art: e.art, status: 'offen', antragsteller: ich.kontoId,
+      von: null, bis: null, bei: null, begruendung: '', ausgleich: null,
+      bezug: { vorgaenger: null, gegenvorschlagZu: null, ausnahme: null },
+      ausnahmeArt: null, parameter: null, gueltigAb: null,
+      nachtraeglich: false, verfallAb: null, kommentar: null,
+      erstellt: jetztText(), entschieden: null, entschiedenVon: null, markierung: null,
+    };
+
+    if (e.art === 'regelaenderung') {
+      if (!istObjekt(e.parameter) || !Object.keys(e.parameter).length) throw new FachFehler('Bitte den neuen Parameterwert angeben');
+      for (const k of Object.keys(e.parameter)) {
+        if (!(k in STANDARD_REGELN) || k === 'gueltigAb' || k === 'planbeginn') throw new FachFehler(`Unbekannter Parameter: ${k}`);
+      }
+      const ab = zeitpunkt(e.gueltigAb, 'Stichtag');
+      if (ab <= jetzt()) throw new FachFehler(MELDUNG.STICHTAG);
+      if (alle.some((a) => a.status === 'offen' && a.art === 'regelaenderung' && a.id !== ausser)) throw new FachFehler(MELDUNG.REGEL_OFFEN);
+      // Probe: Regelwerk mit neuem Wert muss berechenbar sein
+      const probe = [...versionen, { ...tiefMischen(versionen.at(-1), e.parameter), gueltigAb: Z.format(ab) }];
+      try {
+        berechnePlan({ regeln: probe, ferien: await ferien(), zeitraum: { von: Z.format(ab), bis: Z.format(Z.plusTage(ab, 400)) } });
+      } catch (err) {
+        throw new FachFehler(`Ungültiger Parameterwert: ${err.message}`);
+      }
+      Object.assign(doc, { parameter: e.parameter, gueltigAb: Z.format(ab), begruendung: (e.begruendung ?? '').trim(), verfallAb: Z.format(ab) });
+      return doc;
+    }
+
+    const aktiveAusnahmen = alle.filter((a) => a.status === 'bestaetigt' && AUSNAHME_ARTEN.has(a.art));
+
+    if (e.art === 'storno' || e.art === 'aenderung') {
+      const ziel = aktiveAusnahmen.find((a) => a.id === e.bezug?.ausnahme);
+      if (!ziel) throw new FachFehler('Storno oder Änderung braucht eine bestätigte Ausnahme');
+      doc.bezug.ausnahme = ziel.id;
+      if (e.art === 'storno') {
+        Object.assign(doc, { von: ziel.von, bis: ziel.bis, bei: ziel.bei, ausgleich: ziel.ausgleich, begruendung: (e.begruendung ?? '').trim() });
+      } else {
+        doc.ausnahmeArt = ziel.art === 'aenderung' ? ziel.ausnahmeArt : ziel.art;
+        const artFuerInhalt = e.ausgleich ? 'ausnahme_mit_ausgleich' : doc.ausnahmeArt;
+        Object.assign(doc, await pruefeAusnahmeInhalt(e, artFuerInhalt, versionen));
+      }
+    } else {
+      Object.assign(doc, await pruefeAusnahmeInhalt(e, e.art, versionen));
+    }
+
+    const meine = zeitraeumeVon({ ...doc, id: '_neu' }, alle);
+    // Konflikt mit Bestätigtem (die geänderte Ausnahme selbst ausgenommen)
+    for (const a of aktiveAusnahmen) {
+      if (a.id === doc.bezug.ausnahme) continue;
+      if (zeitraeumeVon(a, alle).some((z) => meine.some((m) => ueberschneiden(m, z)))) throw new FachFehler(MELDUNG.KONFLIKT);
+    }
+    // höchstens ein offener Antrag je Zeitraum
+    for (const a of alle) {
+      if (a.status !== 'offen' || a.id === ausser) continue;
+      if (zeitraeumeVon(a, alle).some((z) => meine.some((m) => ueberschneiden(m, z)))) throw new FachFehler(MELDUNG.UEBERLAPPUNG);
+    }
+
+    const beginn = Math.min(...meine.map((m) => m.von));
+    doc.verfallAb = Z.format(beginn);
+    doc.nachtraeglich = beginn <= jetzt();
+    return doc;
+  }
+
+  async function offenerAntrag(id) {
+    await verfallPruefen();
+    const a = await speicher.lesen('antraege', id);
+    if (!a) throw new FachFehler('Antrag nicht gefunden');
+    if (a.status !== 'offen') throw new FachFehler(MELDUNG.NICHT_OFFEN);
+    return a;
+  }
+
+  async function setzeStatus(a, status, ich, extra = {}) {
+    const { id, ...rest } = a;
+    await speicher.schreiben('antraege', id, { ...rest, status, entschieden: jetztText(), entschiedenVon: ich, ...extra });
+  }
+
+  // ---- öffentliche Methoden -----------------------------------------------
+
+  async function verfallPruefen() {
+    const t = jetzt();
+    const verfallen = [];
+    for (const a of await speicher.liste('antraege')) {
+      if (a.status !== 'offen' || a.nachtraeglich || !a.verfallAb) continue;
+      if (Z.parse(a.verfallAb) <= t) {
+        await setzeStatus(a, 'verfallen', SYSTEM);
+        await protokoll(SYSTEM, 'antrag_verfallen', { bezug: a.id, alt: 'offen', neu: 'verfallen' });
+        verfallen.push(a.id);
+      }
+    }
+    return verfallen;
+  }
+
+  return {
+    async einrichten({ mamaKontoId = null } = {}) {
+      const nutzer = await speicher.aktuellerNutzer();
+      if (!nutzer?.istBesitzer) throw new FachFehler(MELDUNG.NUR_PAPA_EINRICHTEN);
+      if (await speicher.lesen('config', 'rollen')) throw new FachFehler('Der Plan ist bereits eingerichtet');
+      if (mamaKontoId && mamaKontoId === nutzer.kontoId) throw new FachFehler('Mama braucht ein eigenes Konto');
+      // Ohne Angabe wird das erste andere Konto, das den Plan öffnet, automatisch Mama.
+      await speicher.schreiben('config', 'rollen', { papa: nutzer.kontoId, mama: mamaKontoId ?? null });
+      await speicher.schreiben('regeln', 'r-0001', { ...STANDARD_REGELN, antragId: null });
+      for (const f of FERIEN_BAYERN) await speicher.schreiben('ferien', `${f.schuljahr}:${f.art}`, { ...f, schulbeginn: null });
+      await protokoll(nutzer.kontoId, 'einrichtung', { neu: { papa: nutzer.kontoId, mama: mamaKontoId } });
+    },
+
+    async ich() {
+      const { kontoId, rolle } = await angemeldet();
+      return { kontoId, rolle };
+    },
+
+    verfallPruefen,
+
+    async antragStellen(eingabe) {
+      await verfallPruefen();
+      const ich = await angemeldet();
+      const doc = await baueAntrag(eingabe, ich);
+      const id = neueId();
+      await speicher.schreiben('antraege', id, doc);
+      await protokoll(ich.kontoId, doc.art === 'regelaenderung' ? 'regelaenderung_beantragt' : 'antrag_gestellt', { bezug: id, neu: doc });
+      return { ...doc, id };
+    },
+
+    async bestaetigen(id) {
+      const a = await offenerAntrag(id);
+      const ich = await angemeldet();
+      if (a.antragsteller === ich.kontoId) throw new FachFehler(MELDUNG.EIGENER);
+
+      if (a.art === 'storno' || a.art === 'aenderung') {
+        const ziel = await speicher.lesen('antraege', a.bezug.ausnahme);
+        if (!ziel || ziel.status !== 'bestaetigt') throw new FachFehler('Die betroffene Ausnahme ist nicht mehr gültig');
+        await setzeStatus(ziel, a.art === 'storno' ? 'storniert' : 'ersetzt', ich.kontoId, { entschieden: ziel.entschieden, entschiedenVon: ziel.entschiedenVon });
+        await protokoll(ich.kontoId, a.art === 'storno' ? 'ausnahme_storniert' : 'ausnahme_ersetzt', { bezug: ziel.id, alt: 'bestaetigt', neu: a.art === 'storno' ? 'storniert' : 'ersetzt' });
+      }
+
+      if (a.art === 'regelaenderung') {
+        const versionen = await regelVersionen();
+        const basis = versionen.filter((v) => v.gueltigAb <= a.gueltigAb).at(-1) ?? versionen[0];
+        const neu = { ...tiefMischen(basis, a.parameter), gueltigAb: a.gueltigAb, antragId: a.id };
+        await speicher.schreiben('regeln', `r-${a.gueltigAb}`, neu);
+        // bestätigte Ausnahmen nach dem Stichtag markieren
+        for (const x of await speicher.liste('antraege')) {
+          if (x.status === 'bestaetigt' && AUSNAHME_ARTEN.has(x.art)) {
+            const ende = x.ausgleich && x.ausgleich.bis > x.bis ? x.ausgleich.bis : x.bis;
+            if (ende > a.gueltigAb) {
+              const { id: xid, ...rest } = x;
+              await speicher.schreiben('antraege', xid, { ...rest, markierung: 'regel_geaendert' });
+            }
+          }
+        }
+      }
+
+      await setzeStatus(a, 'bestaetigt', ich.kontoId);
+      await protokoll(ich.kontoId, a.art === 'regelaenderung' ? 'regelaenderung_bestaetigt' : 'antrag_bestaetigt', { bezug: id, alt: 'offen', neu: 'bestaetigt' });
+    },
+
+    async ablehnen(id, kommentar, gegenvorschlag = null) {
+      const a = await offenerAntrag(id);
+      const ich = await angemeldet();
+      if (a.antragsteller === ich.kontoId) throw new FachFehler(MELDUNG.EIGENER);
+      const k = (kommentar ?? '').trim();
+      if (!k) throw new FachFehler(MELDUNG.KOMMENTAR);
+
+      if (!gegenvorschlag) {
+        await setzeStatus(a, 'abgelehnt', ich.kontoId, { kommentar: k });
+        await protokoll(ich.kontoId, a.art === 'regelaenderung' ? 'regelaenderung_abgelehnt' : 'antrag_abgelehnt', { bezug: id, alt: 'offen', neu: { status: 'abgelehnt', kommentar: k } });
+        return null;
+      }
+      // Gegenvorschlag erst vollständig prüfen, dann schreiben
+      const doc = await baueAntrag({ art: a.art, bezug: a.bezug, ...gegenvorschlag }, ich, { ausser: id });
+      doc.bezug = { ...doc.bezug, vorgaenger: id, gegenvorschlagZu: id };
+      const neueAntragId = neueId();
+      await setzeStatus(a, 'ersetzt', ich.kontoId, { kommentar: k });
+      await protokoll(ich.kontoId, a.art === 'regelaenderung' ? 'regelaenderung_abgelehnt' : 'antrag_abgelehnt', { bezug: id, alt: 'offen', neu: { status: 'ersetzt', kommentar: k } });
+      await speicher.schreiben('antraege', neueAntragId, doc);
+      await protokoll(ich.kontoId, 'gegenvorschlag', { bezug: neueAntragId, alt: id, neu: doc });
+      return { ...doc, id: neueAntragId };
+    },
+
+    async zurueckziehen(id) {
+      const a = await offenerAntrag(id);
+      const ich = await angemeldet();
+      if (a.antragsteller !== ich.kontoId) throw new FachFehler(MELDUNG.NUR_ANTRAGSTELLER);
+      await setzeStatus(a, 'zurueckgezogen', ich.kontoId);
+      await protokoll(ich.kontoId, 'antrag_zurueckgezogen', { bezug: id, alt: 'offen', neu: 'zurueckgezogen' });
+    },
+
+    // ---- Termine von Lotte (kein Einfluss auf die Betreuung, keine Bestätigung nötig) ----------------
+
+    async termine() {
+      await angemeldet();
+      return speicher.liste('termine');
+    },
+
+    /** Legt einen Termin an (ohne id) oder ändert ihn (mit id). Löschen gibt es nicht, nur Absagen. */
+    async terminSpeichern(e) {
+      const ich = await angemeldet();
+      const titel = (e.titel ?? '').trim();
+      if (!titel) throw new FachFehler('Bitte einen Titel angeben');
+      const ganz = !!e.ganztaegig;
+      const von = ganz ? Z.tag(zeitpunkt(`${String(e.von).slice(0, 10)}T00:00`, 'Beginn')) : zeitpunkt(e.von, 'Beginn');
+      let bis;
+      if (ganz) {
+        bis = Z.tag(zeitpunkt(`${String(e.bis || e.von).slice(0, 10)}T00:00`, 'Ende'));
+        if (bis < von) throw new FachFehler('Das Ende liegt vor dem Beginn');
+      } else {
+        bis = zeitpunkt(e.bis, 'Ende');
+        if (bis <= von) throw new FachFehler('Das Ende muss nach dem Beginn liegen');
+      }
+      const alt = e.id ? await speicher.lesen('termine', e.id) : null;
+      if (e.id && !alt) throw new FachFehler('Termin nicht gefunden');
+      if (alt?.status === 'abgesagt') throw new FachFehler('Ein abgesagter Termin lässt sich nicht mehr ändern');
+      const id = e.id ?? neueId();
+      const neu = {
+        titel, von: Z.format(von), bis: Z.format(bis), ganztaegig: ganz,
+        ort: (e.ort ?? '').trim(), notiz: (e.notiz ?? '').trim(),
+        status: 'aktiv', version: (alt?.version ?? 0) + 1,
+        erstelltVon: alt?.erstelltVon ?? ich.kontoId, erstellt: alt?.erstellt ?? jetztText(), geaendert: jetztText(),
+      };
+      await speicher.schreiben('termine', id, neu);
+      if (alt) { const { id: _i, ...altOhneId } = alt; await protokoll(ich.kontoId, 'termin_geaendert', { bezug: id, alt: altOhneId, neu }); }
+      else await protokoll(ich.kontoId, 'termin_angelegt', { bezug: id, neu });
+      return { ...neu, id };
+    },
+
+    async terminAbsagen(id) {
+      const ich = await angemeldet();
+      const t = await speicher.lesen('termine', id);
+      if (!t) throw new FachFehler('Termin nicht gefunden');
+      if (t.status === 'abgesagt') throw new FachFehler('Der Termin ist schon abgesagt');
+      const { id: _i, ...rest } = t;
+      await speicher.schreiben('termine', id, { ...rest, status: 'abgesagt', version: (t.version ?? 0) + 1, geaendert: jetztText() });
+      await protokoll(ich.kontoId, 'termin_abgesagt', { bezug: id, alt: 'aktiv', neu: 'abgesagt' });
+    },
+
+    async ferienSpeichern(e) {
+      const ich = await angemeldet();
+      if (ich.rolle !== 'papa') throw new FachFehler(MELDUNG.NUR_PAPA_FERIEN);
+      if (!FERIENARTEN.includes(e.art)) throw new FachFehler(`Unbekannte Ferienart: ${e.art}`);
+      if (!/^\d{4}\/\d{2}$/.test(e.schuljahr ?? '')) throw new FachFehler('Schuljahr im Format 2030/31 angeben');
+      let erster; let letzter;
+      try {
+        erster = Z.parse(e.erster);
+        letzter = Z.parse(e.letzter);
+      } catch {
+        throw new FachFehler('Bitte gültige Daten angeben');
+      }
+      if (letzter < erster) throw new FachFehler('Der letzte Ferientag liegt vor dem ersten');
+      const schule = e.schulbeginn ? Z.parse(e.schulbeginn) : ersterSchultag(e.letzter);
+      const wt = Z.wochentag(schule);
+      if (wt === 0 || wt === 6) throw new FachFehler('Der Schulbeginn muss ein Werktag sein');
+      if (schule <= letzter || schule > Z.plusTage(letzter, 7)) throw new FachFehler('Der Schulbeginn liegt höchstens 7 Tage nach Ferienende');
+      const id = `${e.schuljahr}:${e.art}`;
+      const neu = { schuljahr: e.schuljahr, art: e.art, erster: Z.formatDatum(erster), letzter: Z.formatDatum(letzter), schulbeginn: e.schulbeginn ? Z.formatDatum(schule) : null };
+      for (const f of await speicher.liste('ferien')) {
+        if (f.id === id) continue;
+        if (Z.parse(f.erster) <= letzter && erster <= Z.parse(f.letzter)) throw new FachFehler('Die Ferien überschneiden sich mit anderen Ferien');
+      }
+      const alt = await speicher.lesen('ferien', id);
+      await speicher.schreiben('ferien', id, neu);
+      if (alt) delete alt.id;
+      await protokoll(ich.kontoId, alt ? 'ferien_geaendert' : 'ferien_angelegt', { bezug: id, alt, neu });
+    },
+
+    async planBerechnen(zr) {
+      return berechnePlan({ regeln: await regelVersionen(), ferien: await ferien(), antraege: await speicher.liste('antraege'), zeitraum: zr });
+    },
+
+    /** Vorschau: Übergaben, die durch den Antrag entfallen bzw. neu entstehen. */
+    async vorschau(eingabe, { ausser = null } = {}) {
+      const ich = await angemeldet();
+      const doc = await baueAntrag(eingabe, ich, { ausser });
+      const alle = await speicher.liste('antraege');
+      const z = zeitraeumeVon({ ...doc, id: '_neu' }, alle);
+      const zr = { von: Z.format(Z.plusTage(Math.min(...z.map((x) => x.von)), -1)), bis: Z.format(Z.plusTage(Math.max(...z.map((x) => x.bis)), 1)) };
+      const basis = { regeln: await regelVersionen(), ferien: await ferien(), zeitraum: zr };
+      const simuliert = alle.map((a) => (a.id === doc.bezug.ausnahme ? { ...a, status: 'ersetzt' } : a));
+      if (doc.art !== 'storno') simuliert.push({ ...doc, id: '_neu', status: 'bestaetigt' });
+      const vorher = berechnePlan({ ...basis, antraege: alle }).uebergaben;
+      const nachher = berechnePlan({ ...basis, antraege: simuliert }).uebergaben;
+      const key = (u) => `${u.zeit}|${u.von}|${u.an}`;
+      const kv = new Set(vorher.map(key));
+      const kn = new Set(nachher.map(key));
+      return { entfallen: vorher.filter((u) => !kn.has(key(u))), neu: nachher.filter((u) => !kv.has(key(u))) };
+    },
+
+    async antraege() {
+      await verfallPruefen();
+      return speicher.liste('antraege');
+    },
+
+    async zuEntscheiden() {
+      const ich = await angemeldet();
+      return (await this.antraege()).filter((a) => a.status === 'offen' && a.antragsteller !== ich.kontoId);
+    },
+
+    async verlauf() {
+      await angemeldet();
+      return speicher.liste('verlauf');
+    },
+
+    async regeln() {
+      return regelVersionen();
+    },
+
+    async rollen() {
+      await angemeldet();
+      return speicher.lesen('config', 'rollen');
+    },
+
+    /** Gesamtsicherung (Rollen, Regeln, Ferien, Anträge, Verlauf) als JSON-Objekt. Für beide Rollen. */
+    async sicherungExportieren() {
+      await angemeldet();
+      return {
+        format: 'betreuungsplaner-sicherung',
+        version: 1,
+        erzeugt: jetztText(),
+        rollen: await speicher.lesen('config', 'rollen'),
+        regeln: await speicher.liste('regeln'),
+        ferien: await speicher.liste('ferien'),
+        antraege: await speicher.liste('antraege'),
+        termine: await speicher.liste('termine'),
+        verlauf: await speicher.liste('verlauf'),
+      };
+    },
+
+    /**
+     * Spielt eine Sicherung ein (nur Papa). Regeln, Ferien und Anträge werden mit gleicher ID überschrieben,
+     * fehlende Verlaufseinträge angehängt; vorhandene Verlaufseinträge bleiben unberührt. Rollen bleiben.
+     */
+    async sicherungEinspielen(daten) {
+      const ich = await angemeldet();
+      if (ich.rolle !== 'papa') throw new FachFehler(MELDUNG.NUR_PAPA_SICHERUNG);
+      const ok = daten && daten.format === 'betreuungsplaner-sicherung' && daten.version === 1
+        && ['regeln', 'ferien', 'antraege', 'verlauf'].every((k) => Array.isArray(daten[k]))
+        && ['regeln', 'ferien', 'antraege', 'verlauf'].every((k) => daten[k].every((x) => istObjekt(x) && (k === 'verlauf' || typeof x.id === 'string')))
+        && (daten.termine === undefined || (Array.isArray(daten.termine) && daten.termine.every((x) => istObjekt(x) && typeof x.id === 'string')));
+      if (!ok) throw new FachFehler(MELDUNG.SICHERUNG_UNGUELTIG);
+      for (const sammlung of ['regeln', 'ferien', 'antraege', 'termine']) {
+        for (const { id, ...rest } of daten[sammlung] ?? []) await speicher.schreiben(sammlung, id, rest);
+      }
+      const schluessel = (v) => JSON.stringify([v.zeit, v.erstelltMs, v.kontoId, v.ereignis, v.bezug]);
+      const vorhanden = new Set((await speicher.liste('verlauf')).map(schluessel));
+      let neu = 0;
+      for (const { id, ...rest } of daten.verlauf) {
+        if (vorhanden.has(schluessel(rest))) continue;
+        await speicher.anhaengen('verlauf', rest);
+        neu++;
+      }
+      await protokoll(ich.kontoId, 'sicherung_eingespielt', {
+        neu: { regeln: daten.regeln.length, ferien: daten.ferien.length, antraege: daten.antraege.length, termine: (daten.termine ?? []).length, verlauf: neu },
+      });
+    },
+
+    async ferien() {
+      return speicher.liste('ferien');
+    },
+  };
+}
+
+return { FachFehler, MELDUNG, ANTRAGSARTEN, FERIENARTEN, tiefMischen, ausgleichDifferenz, erstelleDienst };
+};
+__f['speicher/schnittstelle.js'] = function () {
+// Speicher-Schnittstelle (Adapter). Beschreibung: docs/adapter.md
+//
+// Ein Adapter ist ein Objekt mit diesen asynchronen Methoden:
+//
+//   aktuellerNutzer()                 -> { kontoId: string, istBesitzer: boolean } | null
+//   lesen(sammlung, id)               -> Dokument | null
+//   liste(sammlung)                   -> Dokument[]   (Verlauf in Einfügereihenfolge)
+//   schreiben(sammlung, id, dokument) -> void         (anlegen oder ersetzen; nicht für "verlauf")
+//   anhaengen(sammlung, dokument)     -> id           (nur für "verlauf")
+//
+// Es gibt bewusst keine Lösch-Methode: Nichts Bestätigtes verschwindet, der Verlauf ist unveränderlich.
+// Jedes Dokument wird mit seiner id gespeichert und mit Feld "id" zurückgegeben.
+
+const SAMMLUNGEN = ['config', 'regeln', 'ferien', 'antraege', 'verlauf', 'termine'];
+const NUR_ANHAENGEN = new Set(['verlauf']);
+
+class SpeicherFehler extends Error {}
+
+function pruefeSammlung(sammlung) {
+  if (!SAMMLUNGEN.includes(sammlung)) throw new SpeicherFehler(`Unbekannte Sammlung: ${sammlung}`);
+}
+
+function pruefeSchreiben(sammlung) {
+  pruefeSammlung(sammlung);
+  if (NUR_ANHAENGEN.has(sammlung)) {
+    throw new SpeicherFehler('Verlaufseinträge können nicht geändert oder gelöscht werden');
+  }
+}
+
+function pruefeAnhaengen(sammlung) {
+  pruefeSammlung(sammlung);
+  if (!NUR_ANHAENGEN.has(sammlung)) throw new SpeicherFehler(`Anhängen nur für Verlauf, nicht für ${sammlung}`);
+}
+
+/** Prüft, ob ein Objekt die Schnittstelle erfüllt (für eigene Adapter). */
+function istSpeicher(s) {
+  return ['aktuellerNutzer', 'lesen', 'liste', 'schreiben', 'anhaengen'].every((m) => typeof s?.[m] === 'function');
+}
+
+const kopie = (x) => (x === null || x === undefined ? x : JSON.parse(JSON.stringify(x)));
+
+return { SAMMLUNGEN, NUR_ANHAENGEN, SpeicherFehler, pruefeSammlung, pruefeSchreiben, pruefeAnhaengen, istSpeicher, kopie };
+};
+__f['speicher/inmemory.js'] = function () {
+// In-Memory-Adapter für Tests und lokale Entwicklung.
+// Der angemeldete Nutzer wird über nutzerSetzen() umgeschaltet (Entwicklungsmodus).
+
+const { pruefeSammlung, pruefeSchreiben, pruefeAnhaengen, kopie } = __r('speicher/schnittstelle.js');
+
+const DEV_KONTEN = {
+  papa: { kontoId: 'dev-papa', istBesitzer: true },
+  mama: { kontoId: 'dev-mama', istBesitzer: false },
+};
+
+function erstelleInMemorySpeicher({ nutzer = DEV_KONTEN.papa, daten } = {}) {
+  // daten: { sammlung: [[id, dok], ...] } zum Vorbelegen (wird vom localStorage-Adapter genutzt)
+  const store = new Map();
+  let zaehler = 0;
+  let aktuell = nutzer;
+
+  const sammlung = (name) => {
+    pruefeSammlung(name);
+    if (!store.has(name)) store.set(name, new Map());
+    return store.get(name);
+  };
+
+  if (daten) {
+    for (const [name, eintraege] of Object.entries(daten)) {
+      if (name.startsWith('_')) continue;
+      for (const [id, dok] of eintraege) sammlung(name).set(id, dok);
+    }
+    zaehler = daten._zaehler ?? sammlung('verlauf').size;
+  }
+
+  return {
+    async aktuellerNutzer() {
+      return kopie(aktuell);
+    },
+    async lesen(name, id) {
+      const d = sammlung(name).get(id);
+      return d ? { ...kopie(d), id } : null;
+    },
+    async liste(name) {
+      return [...sammlung(name).entries()].map(([id, d]) => ({ ...kopie(d), id }));
+    },
+    async schreiben(name, id, dok) {
+      pruefeSchreiben(name);
+      const { id: _ignoriert, ...rest } = dok;
+      sammlung(name).set(id, kopie(rest));
+    },
+    async anhaengen(name, dok) {
+      pruefeAnhaengen(name);
+      zaehler += 1;
+      const id = `v${String(zaehler).padStart(8, '0')}`;
+      const { id: _ignoriert, ...rest } = dok;
+      sammlung(name).set(id, kopie(rest));
+      return id;
+    },
+
+    // --- nur Entwicklung / Tests ---
+    nutzerSetzen(n) {
+      aktuell = n;
+    },
+    _export() {
+      const out = { _zaehler: zaehler };
+      for (const [name, m] of store) out[name] = [...m.entries()];
+      return kopie(out);
+    },
+  };
+}
+
+return { DEV_KONTEN, erstelleInMemorySpeicher };
+};
+__f['speicher/localstorage.js'] = function () {
+// localStorage-Adapter für lokale Entwicklung: wie In-Memory, aber nach jedem Schreiben persistiert.
+// storage ist injizierbar (Tests); Standard ist window.localStorage.
+
+const { erstelleInMemorySpeicher, DEV_KONTEN } = __r('speicher/inmemory.js');
+
+function standardSpeicher() {
+  try { return globalThis.localStorage; } catch { return undefined; } // z. B. data:-URL: Zugriff wirft
+}
+
+function erstelleLocalStorageSpeicher({
+  storage = standardSpeicher(),
+  schluessel = 'betreuungsplaner:v1',
+  nutzer = DEV_KONTEN.papa,
+} = {}) {
+  let daten;
+  try {
+    const roh = storage?.getItem(schluessel);
+    daten = roh ? JSON.parse(roh) : undefined;
+  } catch {
+    daten = undefined; // privates Fenster, gesperrter Speicher: leer starten
+  }
+  const innen = erstelleInMemorySpeicher({ nutzer, daten });
+  const sichern = () => {
+    try {
+      storage?.setItem(schluessel, JSON.stringify(innen._export()));
+    } catch {
+      /* Speicher nicht verfügbar: Daten bleiben nur im Speicher */
+    }
+  };
+
+  return {
+    ...innen,
+    async schreiben(...args) {
+      await innen.schreiben(...args);
+      sichern();
+    },
+    async anhaengen(...args) {
+      const id = await innen.anhaengen(...args);
+      sichern();
+      return id;
+    },
+    zuruecksetzen() {
+      try { storage?.removeItem(schluessel); } catch { /* ignorieren */ }
+    },
+  };
+}
+
+return { erstelleLocalStorageSpeicher };
+};
+__f['speicher/firebase.js'] = function () {
+// Firebase-Adapter (Firestore + Google-Anmeldung). Beschreibung: docs/adapter.md, docs/firebase-einrichtung.md
+// Das Firebase-SDK wird erst beim Start von Google geladen (kein Eintrag im Bündel).
+
+const { pruefeSammlung, pruefeSchreiben, pruefeAnhaengen, kopie, SpeicherFehler } = __r('speicher/schnittstelle.js');
+
+const SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
+const kodiere = (id) => encodeURIComponent(id); // Firestore-IDs dürfen kein "/" enthalten (z. B. "2027/28:herbst")
+const dekodiere = (id) => decodeURIComponent(id);
+
+async function erstelleFirebaseSpeicher({ config, papaEmail = '' }) {
+  const [{ initializeApp }, A, F] = await Promise.all([
+    import(SDK + 'firebase-app.js'),
+    import(SDK + 'firebase-auth.js'),
+    import(SDK + 'firebase-firestore.js'),
+  ]);
+  const fbApp = initializeApp(config);
+  const auth = A.getAuth(fbApp);
+  auth.languageCode = 'de';
+  let db;
+  try {
+    db = F.initializeFirestore(fbApp, { localCache: F.persistentLocalCache({ tabManager: F.persistentMultipleTabManager() }) });
+  } catch {
+    db = F.getFirestore(fbApp);
+  }
+  try { await A.getRedirectResult(auth); } catch { /* Anmeldung wird unten über den Zustand erkannt */ }
+  const bereitP = new Promise((res) => { const u = A.onAuthStateChanged(auth, () => { u(); res(); }); });
+
+  const fehler = (e) => {
+    if (e?.code === 'permission-denied') {
+      return new SpeicherFehler(`Dein Konto (${auth.currentUser?.email ?? 'unbekannt'}) ist für diesen Plan nicht freigeschaltet.`);
+    }
+    if (e?.code === 'unavailable') return new SpeicherFehler('Keine Verbindung zur Datenbank. Bitte Internet prüfen.');
+    return e;
+  };
+  const sicher = async (f) => { try { return await f(); } catch (e) { throw fehler(e); } };
+
+  const lesen = (name, id) => sicher(async () => {
+    pruefeSammlung(name);
+    const s = await F.getDoc(F.doc(db, name, kodiere(id)));
+    return s.exists() ? { ...s.data(), id } : null;
+  });
+
+  return {
+    async bereit() { await bereitP; },
+    email() { return auth.currentUser?.email ?? null; },
+    async anmelden() {
+      const p = new A.GoogleAuthProvider();
+      p.setCustomParameters({ prompt: 'select_account' });
+      try {
+        await A.signInWithPopup(auth, p);
+      } catch (e) {
+        if (['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'].includes(e?.code)) {
+          await A.signInWithRedirect(auth, p);
+          return;
+        }
+        if (['auth/popup-closed-by-user', 'auth/cancelled-popup-request'].includes(e?.code)) return;
+        throw new SpeicherFehler(`Anmeldung fehlgeschlagen (${e?.code ?? e?.message})`);
+      }
+    },
+    async abmelden() { await A.signOut(auth); },
+
+    async aktuellerNutzer() {
+      await bereitP;
+      const u = auth.currentUser;
+      if (!u) return null;
+      let rollen = null;
+      try { rollen = await lesen('config', 'rollen'); } catch { /* ohne Zugriff: kein Besitzer */ }
+      const istBesitzer = rollen
+        ? rollen.papa === u.uid
+        : (papaEmail ? (u.email ?? '').toLowerCase() === papaEmail.toLowerCase() : true);
+      return { kontoId: u.uid, istBesitzer, email: u.email ?? null };
+    },
+    lesen,
+    liste: (name) => sicher(async () => {
+      pruefeSammlung(name);
+      const s = await F.getDocs(F.collection(db, name));
+      const l = s.docs.map((d) => ({ ...d.data(), id: dekodiere(d.id) }));
+      return name === 'verlauf' ? l.sort((a, b) => (a.id < b.id ? -1 : 1)) : l;
+    }),
+    schreiben: (name, id, dok) => sicher(async () => {
+      pruefeSchreiben(name);
+      const { id: _i, ...rest } = dok;
+      await F.setDoc(F.doc(db, name, kodiere(id)), kopie(rest));
+    }),
+    anhaengen: (name, dok) => sicher(async () => {
+      pruefeAnhaengen(name);
+      const { id: _i, ...rest } = dok;
+      // Zeitbasierte ID: alphabetisch = zeitlich (Einfügereihenfolge)
+      const id = `v${String(Date.now()).padStart(14, '0')}-${Math.random().toString(36).slice(2, 7)}`;
+      await F.setDoc(F.doc(db, name, id), kopie(rest));
+      return id;
+    }),
+  };
+}
+
+return { erstelleFirebaseSpeicher };
+};
+__f['data/firebase-config.js'] = function () {
+// Firebase-Projekt des Betreuungsplaners. Der API-Schlüssel ist kein Geheimnis (steht in jeder Web-App);
+// geschützt sind die Daten durch Anmeldung und die Regeln in firestore.rules.
+const FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyC8DtIi1wGi0vThuOYcjyDQmeBIvmDrLrM',
+  authDomain: 'betreuungsplaner-lotte.firebaseapp.com',
+  projectId: 'betreuungsplaner-lotte',
+  storageBucket: 'betreuungsplaner-lotte.firebasestorage.app',
+  messagingSenderId: '512101772770',
+  appId: '1:512101772770:web:168bf859371a42e1eeddbb',
+};
+
+// Google-Adresse von Papa. Nur dieses Konto kann den Plan einrichten.
+// Leer lassen = das erste angemeldete Konto richtet ein.
+const PAPA_EMAIL = 'sascharusche@gmail.com';
+
+return { FIREBASE_CONFIG, PAPA_EMAIL };
+};
+__f['ui/ctx.js'] = function () {
+// Gemeinsamer Anwendungszustand und kleine DOM-Helfer (Modal, Meldungen).
+
+const app = {
+  dienst: null,
+  speicher: null,
+  d: null,
+  dev: false,
+  state: {
+    monat: null,
+    jahr: null,
+    antragFilter: { status: 'offen', person: 'alle' },
+  },
+  neuLaden: async () => {},
+  zeichne: () => {},
+};
+
+let toastTimer = null;
+function meldung(text, typ = 'info') {
+  const t = document.getElementById('toast');
+  t.textContent = text;
+  t.className = typ;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.hidden = true; }, typ === 'fehler' ? 7000 : 3500);
+}
+
+function zeigeModal(html) {
+  const m = document.getElementById('modal');
+  m.innerHTML = `<div class="rahmen" data-act="modalHintergrund"><div class="box" role="dialog" aria-modal="true">${html}</div></div>`;
+  m.hidden = false;
+  document.body.classList.add('modal-offen');
+  m.querySelector('input,select,textarea,button')?.focus();
+}
+
+function schliesseModal() {
+  const m = document.getElementById('modal');
+  m.hidden = true;
+  m.innerHTML = '';
+  document.body.classList.remove('modal-offen');
+}
+
+const modalBox = () => document.querySelector('#modal .box');
+
+function modalFehler(text) {
+  const e = document.getElementById('mfehler');
+  if (!e) return meldung(text, 'fehler');
+  e.textContent = text;
+  e.hidden = !text;
+  if (text) e.scrollIntoView({ block: 'nearest' });
+}
+
+/** Liest alle Felder mit data-f aus dem Modal. */
+function felder(root = modalBox()) {
+  const o = {};
+  for (const el of root.querySelectorAll('[data-f]')) {
+    o[el.dataset.f] = el.type === 'checkbox' ? el.checked : el.value;
+  }
+  return o;
+}
+
+/** Führt eine Aktion aus und zeigt Fehler verständlich an. Gibt true bei Erfolg zurück. */
+async function fange(fn, { imModal = false } = {}) {
+  try {
+    await fn();
+    return true;
+  } catch (e) {
+    if (imModal) modalFehler(e.message);
+    else meldung(e.message, 'fehler');
+    return false;
+  }
+}
+
+const ZEITEN = Array.from({ length: 96 }, (_, i) => `${String(Math.floor(i / 4)).padStart(2, '0')}:${String((i % 4) * 15).padStart(2, '0')}`);
+
+return { app, meldung, zeigeModal, schliesseModal, modalBox, modalFehler, felder, fange, ZEITEN };
+};
+__f['engine/statistik.js'] = function () {
+// Kennzahlen, Monatsübersicht, Erklärung der Abweichungen und Prüfungen.
+// Reine Funktionen auf Zuständigkeitsintervallen (Minutenwerte, siehe zeit.js).
+
+const Z = __r('engine/zeit.js');
+const { bilanz } = __r('engine/engine.js');
+
+const ABSCHNITTE = [
+  'Neujahr aus Vorjahr', 'Frühjahr', 'Ausgleich Frühjahr', 'Ostern – Woche 1', 'Ostern – Woche 2',
+  'Pfingsten – Woche 1', 'Pfingsten – Woche 2', 'Sommer – Hälfte 1', 'Sommer – Hälfte 2',
+  'Herbst', 'Ausgleich Herbst', 'Weihnachten', 'Neujahr ins Folgejahr',
+  'Heiligabend-Regel', 'Wirkung bestätigter Ausnahmen',
+];
+
+const AUSNAHME_GRUENDE = new Set(['Ausnahme', 'Ausnahme: Weihnachtsbesuch', 'Ausgleich']);
+
+/** Anteile und Abweichung Papa gegenüber 50 % aus einer Bilanz. */
+function kennzahlen(b) {
+  const n = b.naechte.papa + b.naechte.mama;
+  const s = b.stunden.papa + b.stunden.mama;
+  const anteil = (a, g) => (g ? a / g : 0);
+  return {
+    naechte: b.naechte,
+    stunden: b.stunden,
+    anteilNaechte: { papa: anteil(b.naechte.papa, n), mama: anteil(b.naechte.mama, n) },
+    anteilStunden: { papa: anteil(b.stunden.papa, s), mama: anteil(b.stunden.mama, s) },
+    abweichung: { naechte: b.naechte.papa - n / 2, stunden: b.stunden.papa - s / 2 },
+  };
+}
+
+const leereBilanz = () => ({ naechte: { papa: 0, mama: 0 }, stunden: { papa: 0, mama: 0 } });
+
+function addiere(a, b) {
+  return {
+    naechte: { papa: a.naechte.papa + b.naechte.papa, mama: a.naechte.mama + b.naechte.mama },
+    stunden: { papa: a.stunden.papa + b.stunden.papa, mama: a.stunden.mama + b.stunden.mama },
+  };
+}
+
+/** Bilanz je Kalendermonat innerhalb [von, bis) (Minutenwerte). */
+function monatsuebersicht(intervalle, von, bis) {
+  const out = [];
+  let y = Z.jahr(von);
+  let m = Z.monat(von);
+  for (;;) {
+    const start = Z.datum(y, m, 1);
+    if (start >= bis) break;
+    const ny = m === 12 ? y + 1 : y;
+    const nm = m === 12 ? 1 : m + 1;
+    const a = Math.max(start, von);
+    const b = Math.min(Z.datum(ny, nm, 1), bis);
+    const bl = bilanz(intervalle, a, b);
+    out.push({ jahr: y, monat: m, ...bl, kennzahlen: kennzahlen(bl) });
+    y = ny;
+    m = nm;
+  }
+  return out;
+}
+
+function zeiger(liste) {
+  let i = 0;
+  return (t) => {
+    while (i < liste.length - 1 && liste[i].bis <= t) i++;
+    const iv = liste[i];
+    return iv && iv.von <= t && t < iv.bis ? iv : null;
+  };
+}
+
+function naechteIn(a, b, von, bis) {
+  let n = Z.tag(a) + 1439;
+  if (n < a) n += Z.MINUTEN_PRO_TAG;
+  let z = 0;
+  for (; n < b; n += Z.MINUTEN_PRO_TAG) if (n >= von && n < bis) z++;
+  return z;
+}
+
+/**
+ * Wirkung je Abschnitt gegenüber dem reinen Grundrhythmus, aus Sicht von Papa.
+ * Rückgabe: Zeilen { abschnitt, naechte, stunden } in der Reihenfolge ABSCHNITTE (nur vorkommende)
+ * und die Summe. Die Summe entspricht (Plan − reiner Rhythmus) für Papa.
+ */
+function abweichungen(plan, rhythmus, von, bis) {
+  const punkte = new Set([von, bis]);
+  for (const iv of [...plan, ...rhythmus]) {
+    if (iv.von > von && iv.von < bis) punkte.add(iv.von);
+    if (iv.bis > von && iv.bis < bis) punkte.add(iv.bis);
+  }
+  const t = [...punkte].sort((a, b) => a - b);
+  const imPlan = zeiger(plan);
+  const imRhythmus = zeiger(rhythmus);
+  const acc = new Map();
+  for (let i = 0; i < t.length - 1; i++) {
+    const a = imPlan(t[i]);
+    const r = imRhythmus(t[i]);
+    if (!a || !r) continue;
+    let label;
+    if (a.grund === 'Grundrhythmus') label = 'Heiligabend-Regel';
+    else if (AUSNAHME_GRUENDE.has(a.grund)) label = 'Wirkung bestätigter Ausnahmen';
+    else label = a.grund;
+    const e = acc.get(label) ?? { abschnitt: label, naechte: 0, stunden: 0, vorgekommen: false };
+    e.vorgekommen = true;
+    const d = (a.bei === 'papa' ? 1 : 0) - (r.bei === 'papa' ? 1 : 0);
+    e.stunden += (d * (t[i + 1] - t[i])) / 60;
+    e.naechte += d * naechteIn(t[i], t[i + 1], von, bis);
+    acc.set(label, e);
+  }
+  const zeilen = ABSCHNITTE.filter((n) => acc.has(n)).map((n) => {
+    const { abschnitt, naechte, stunden } = acc.get(n);
+    return { abschnitt, naechte, stunden };
+  });
+  const summe = zeilen.reduce((s, z) => ({ naechte: s.naechte + z.naechte, stunden: s.stunden + z.stunden }), { naechte: 0, stunden: 0 });
+  return { zeilen, summe };
+}
+
+/** Prüfungen wie in der Excel (Lückenlosigkeit, Werktagstausch). */
+function pruefungen(intervalle, von, bis) {
+  const ivs = intervalle.filter((i) => i.bis > von && i.von < bis);
+  const b = bilanz(ivs, von, bis);
+  let luecken = 0;
+  for (let i = 1; i < ivs.length; i++) if (ivs[i].von !== ivs[i - 1].bis) luecken++;
+  let erwarteteNaechte = 0;
+  let n = Z.tag(von) + 1439;
+  if (n < von) n += Z.MINUTEN_PRO_TAG;
+  for (; n < bis; n += Z.MINUTEN_PRO_TAG) erwarteteNaechte++;
+
+  const dauer = (grund, jahr) => ivs
+    .filter((i) => i.grund === grund && Z.jahr(i.von) === jahr)
+    .reduce((s, i) => s + (Math.min(i.bis, bis) - Math.max(i.von, von)), 0);
+  const jahre = [...new Set(ivs.map((i) => Z.jahr(i.von)))];
+  let tauschOk = true;
+  for (const art of ['Frühjahr', 'Herbst']) {
+    for (const j of jahre) {
+      const ausgleich = dauer(`Ausgleich ${art}`, j);
+      if (ausgleich && ausgleich !== dauer(art, j)) tauschOk = false;
+    }
+  }
+  return [
+    { text: 'Nächte decken den Zeitraum lückenlos ab', ok: b.naechte.papa + b.naechte.mama === erwarteteNaechte },
+    { text: 'Stunden decken den Zeitraum lückenlos ab', ok: luecken === 0 && b.stunden.papa + b.stunden.mama === (bis - von) / 60 },
+    { text: 'Werktagstausch Frühjahr und Herbst ist ausgeglichen (Saldo 0)', ok: tauschOk },
+  ];
+}
+
+return { ABSCHNITTE, kennzahlen, leereBilanz, addiere, monatsuebersicht, abweichungen, pruefungen };
+};
+__f['ui/util.js'] = function () {
+// Formatierung (Deutsch, TT.MM.JJJJ, 24-Stunden-Uhr) und Feiertage Bayern.
+
+const Z = __r('engine/zeit.js');
+
+const NAME = { papa: 'Papa', mama: 'Mama' };
+const MONATE = ['Januar', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'August', 'September', 'Oktober', 'November', 'Dezember'];
+const WT = ['So', 'Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa'];
+const WT_LANG = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+
+const ARTEN_TEXT = {
+  ausnahme: 'Ausnahme',
+  ausnahme_mit_ausgleich: 'Ausnahme mit Ausgleich',
+  weihnachtsbesuch: 'Weihnachtsbesuch',
+  storno: 'Storno',
+  aenderung: 'Änderung einer Ausnahme',
+  regelaenderung: 'Regeländerung',
+};
+
+const STATUS_TEXT = {
+  offen: 'offen', bestaetigt: 'bestätigt', abgelehnt: 'abgelehnt', ersetzt: 'ersetzt',
+  zurueckgezogen: 'zurückgezogen', verfallen: 'verfallen', storniert: 'storniert',
+};
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const wt = (s) => WT[Z.wochentag(Z.parse(s.slice(0, 10)))];
+const wtLang = (s) => WT_LANG[Z.wochentag(Z.parse(s.slice(0, 10)))];
+const datumDE = (s) => `${s.slice(8, 10)}.${s.slice(5, 7)}.${s.slice(0, 4)}`;
+const kurzDatumDE = (s) => `${s.slice(8, 10)}.${s.slice(5, 7)}.`;
+const uhr = (s) => s.slice(11, 16);
+const datumUhrDE = (s) => `${datumDE(s)} ${uhr(s)} Uhr`;
+const wtDatumUhr = (s) => `${wt(s)} ${kurzDatumDE(s)} ${uhr(s)}`;
+const monatsname = (jahr, monat) => `${MONATE[monat - 1]} ${jahr}`;
+
+function zahl(x, stellen = 1) {
+  const f = 10 ** stellen;
+  return String(Math.round(x * f) / f).replace('.', ',');
+}
+
+function mitVorzeichen(x, stellen = 1) {
+  const f = 10 ** stellen;
+  const r = Math.round(Math.abs(x) * f) / f;
+  if (r === 0) return '±0';
+  return (x < 0 ? '−' : '+') + String(r).replace('.', ',');
+}
+
+const prozent = (x) => `${zahl(x * 100, 1)} %`;
+
+/** "Papa +2 Nächte / +31 h" bzw. "Mama +…" (Abweichung Papa gegenüber 50 %). */
+function saldoText(k) {
+  const n = k.abweichung.naechte;
+  const h = k.abweichung.stunden;
+  if (Math.round(n * 10) === 0 && Math.round(h * 10) === 0) return 'Ausgeglichen';
+  return `Papa ${mitVorzeichen(n)} Nächte / ${mitVorzeichen(h)} h`;
+}
+
+// ---------------------------------------------------------------------------
+// Feiertage Bayern (plus Buß- und Bettag als schulfrei). Benannt, ohne Wirkung auf die Zuordnung.
+
+function ostersonntag(y) {
+  const a = y % 19;
+  const b = Math.floor(y / 100);
+  const c = y % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const monat = Math.floor((h + l - 7 * m + 114) / 31);
+  const tag = ((h + l - 7 * m + 114) % 31) + 1;
+  return Z.datum(y, monat, tag);
+}
+
+const cache = new Map();
+
+/** Objekt { 'JJJJ-MM-TT': Name } */
+function feiertage(y) {
+  if (cache.has(y)) return cache.get(y);
+  const o = ostersonntag(y);
+  const bei = (t) => Z.formatDatum(t);
+  const fest = (m, d) => bei(Z.datum(y, m, d));
+  const nov23 = Z.datum(y, 11, 23);
+  const bussTag = Z.plusTage(nov23, -(((Z.wochentag(nov23) + 7 - 3) % 7) || 7));
+  const f = {
+    [fest(1, 1)]: 'Neujahr',
+    [fest(1, 6)]: 'Heilige Drei Könige',
+    [bei(Z.plusTage(o, -2))]: 'Karfreitag',
+    [bei(Z.plusTage(o, 1))]: 'Ostermontag',
+    [fest(5, 1)]: 'Tag der Arbeit',
+    [bei(Z.plusTage(o, 39))]: 'Christi Himmelfahrt',
+    [bei(Z.plusTage(o, 50))]: 'Pfingstmontag',
+    [bei(Z.plusTage(o, 60))]: 'Fronleichnam',
+    [fest(8, 15)]: 'Mariä Himmelfahrt',
+    [fest(10, 3)]: 'Tag der Deutschen Einheit',
+    [fest(11, 1)]: 'Allerheiligen',
+    [bei(bussTag)]: 'Buß- und Bettag',
+    [fest(12, 25)]: '1. Weihnachtstag',
+    [fest(12, 26)]: '2. Weihnachtstag',
+  };
+  cache.set(y, f);
+  return f;
+}
+
+/** Wochen eines Monats als Array von Tagesbeginn-Minuten (Mo–So, vollständige Wochen). */
+function monatsTage(jahr, monat) {
+  const erster = Z.datum(jahr, monat, 1);
+  const start = Z.montagDerWoche(erster);
+  const ny = monat === 12 ? jahr + 1 : jahr;
+  const nm = monat === 12 ? 1 : monat + 1;
+  const letzter = Z.plusTage(Z.datum(ny, nm, 1), -1);
+  const ende = Z.plusTage(Z.montagDerWoche(letzter), 7);
+  const tage = [];
+  for (let t = start; t < ende; t = Z.plusTage(t, 1)) tage.push(t);
+  return tage;
+}
+
+function download(dateiname, inhalt, typ) {
+  const blob = new Blob([inhalt], { type: typ });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = dateiname;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+return { NAME, MONATE, ARTEN_TEXT, STATUS_TEXT, esc, wt, wtLang, datumDE, kurzDatumDE, uhr, datumUhrDE, wtDatumUhr, monatsname, zahl, mitVorzeichen, prozent, saldoText, ostersonntag, feiertage, monatsTage, download };
+};
+__f['ui/daten.js'] = function () {
+// Lädt alle Eingaben aus dem Dienst und berechnet daraus Plan, Rhythmus und Hilfsstrukturen für die Ansichten.
+
+const Z = __r('engine/zeit.js');
+const { berechnePlan, ferienAbgedecktBis, betreuungsjahre, bilanz } = __r('engine/engine.js');
+const { kennzahlen, leereBilanz } = __r('engine/statistik.js');
+const { feiertage } = __r('ui/util.js');
+
+async function ladeDaten(dienst, jetzt) {
+  const ich = await dienst.ich();
+  const rollen = await dienst.rollen();
+  const antraege = await dienst.antraege(); // wertet Verfall aus, bevor der Verlauf gelesen wird
+  const regeln = await dienst.regeln();
+  const ferien = await dienst.ferien();
+  const termine = await dienst.termine();
+  const verlauf = await dienst.verlauf();
+  const d = { ich, rollen, antraege, regeln, ferien, termine, verlauf, jetzt };
+  rechne(d);
+  return d;
+}
+
+function rechne(d) {
+  d.planVon = Z.parse(d.regeln[0].planbeginn);
+  d.vorlaeufigAb = ferienAbgedecktBis(d.regeln, d.ferien);
+  d.planBis = (d.vorlaeufigAb ?? d.planVon) + 3 * 365 * Z.MINUTEN_PRO_TAG;
+  const zeitraum = { von: Z.format(d.planVon), bis: Z.format(d.planBis) };
+  d.plan = berechnePlan({ regeln: d.regeln, ferien: d.ferien, antraege: d.antraege, zeitraum });
+  d.rhythmus = berechnePlan({ regeln: d.regeln, ferien: [], antraege: [], zeitraum });
+  d.iv = d.plan._intern.intervalle;
+  d.rhIv = d.rhythmus._intern.intervalle;
+  d.jahre = betreuungsjahre(d.regeln, d.ferien);
+  d.ferienTage = d.ferien.map((f) => ({ a: Z.parse(f.erster), b: Z.parse(f.letzter), art: f.art }));
+
+  d.wechselNachTag = new Map();
+  for (const u of d.plan.uebergaben) {
+    const k = Z.tag(Z.parse(u.zeit));
+    if (!d.wechselNachTag.has(k)) d.wechselNachTag.set(k, []);
+    d.wechselNachTag.get(k).push(u);
+  }
+
+  d.offen = d.antraege.filter((a) => a.status === 'offen');
+  d.offenBereiche = [];
+  for (const a of d.offen) {
+    if (a.art === 'regelaenderung' || !a.von) continue;
+    d.offenBereiche.push({ id: a.id, von: Z.parse(a.von), bis: Z.parse(a.bis) });
+    if (a.ausgleich) d.offenBereiche.push({ id: a.id, von: Z.parse(a.ausgleich.von), bis: Z.parse(a.ausgleich.bis) });
+  }
+}
+
+/** Intervall, das t abdeckt (Binärsuche), sonst null. */
+function ivAt(d, t) {
+  let lo = 0;
+  let hi = d.iv.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const iv = d.iv[mid];
+    if (t < iv.von) hi = mid - 1;
+    else if (t >= iv.bis) lo = mid + 1;
+    else return iv;
+  }
+  return null;
+}
+
+function tagInfo(d, tag) {
+  const nachtT = tag + 1439;
+  const vorPlan = nachtT < d.planVon;
+  const iv = vorPlan ? null : ivAt(d, nachtT);
+  const datum = Z.formatDatum(tag);
+  const ferien = d.ferienTage.find((f) => f.a <= tag && tag <= f.b)?.art ?? null;
+  const ende = tag + Z.MINUTEN_PRO_TAG;
+  return {
+    tag,
+    datum,
+    vorPlan,
+    nacht: iv?.bei ?? null,
+    grund: iv?.grund ?? null,
+    ausgleich: !!iv && /^Ausgleich/.test(iv.grund),
+    vorlaeufig: iv ? !!iv.vorlaeufig : false,
+    wechsel: d.wechselNachTag.get(tag) ?? [],
+    ferien,
+    feiertag: feiertage(Z.jahr(tag))[datum] ?? null,
+    termine: d.termine.filter((t) => t.status === 'aktiv' && Z.tag(Z.parse(t.von)) <= tag && tag <= Z.tag(Z.parse(t.bis))),
+    offen: [...new Set(d.offenBereiche.filter((b) => b.von < ende && tag < b.bis).map((b) => b.id))],
+  };
+}
+
+function bilanzFuer(d, von, bis) {
+  return bilanz(d.iv, von, bis);
+}
+
+/** Saldo des laufenden Betreuungsjahres (Schulbeginn Januar bis jetzt); nie über das Jahr hinaus. */
+function saldoBetreuungsjahr(d) {
+  const j = betreuungsjahrZu(d, Math.max(d.jetzt, d.planVon));
+  if (!j) return { jahr: null, k: kennzahlen(leereBilanz()) };
+  const bis = Math.min(d.jetzt, Z.parse(j.bis));
+  const von = Z.parse(j.von);
+  return { jahr: j.jahr, k: bis <= von ? kennzahlen(leereBilanz()) : kennzahlen(bilanz(d.iv, von, bis)) };
+}
+
+function naechsteUebergabe(d) {
+  return d.plan.uebergaben.find((u) => Z.parse(u.zeit) > d.jetzt) ?? null;
+}
+
+function betreuungsjahrZu(d, t) {
+  return d.jahre.find((j) => Z.parse(j.von) <= t && t < Z.parse(j.bis)) ?? d.jahre.at(-1) ?? null;
+}
+
+return { ladeDaten, rechne, ivAt, tagInfo, bilanzFuer, saldoBetreuungsjahr, naechsteUebergabe, betreuungsjahrZu };
+};
+__f['ui/kalender.js'] = function () {
+// Monatskalender und Jahresübersicht.
+
+const Z = __r('engine/zeit.js');
+const { tagInfo } = __r('ui/daten.js');
+const { NAME, MONATE, esc, uhr, monatsTage, feiertage, wtLang, datumDE, monatsname } = __r('ui/util.js');
+
+const FERIEN_NAMEN = {
+  weihnachten: 'Weihnachts-/Neujahrsferien', fruehjahr: 'Frühjahrsferien', ostern: 'Osterferien',
+  pfingsten: 'Pfingstferien', sommer: 'Sommerferien', herbst: 'Herbstferien',
+};
+
+const BUCHSTABE = { papa: 'P', mama: 'M' };
+
+function legendeHtml() {
+  return `<ul class="legende" aria-label="Legende">
+    <li><span class="probe n-papa"></span>Papa (P)</li>
+    <li><span class="probe n-mama"></span>Mama (M)</li>
+    <li><span class="probe ausgleich n-papa"></span>Ausgleich (A, grün)</li>
+    <li><span class="probe ferien-probe">F</span>Ferientag</li>
+    <li><span class="probe tm-probe">●</span>Termin Lotte</li>
+    <li><span class="probe offen-probe"></span>offener Antrag (gestrichelt)</li>
+    <li><span class="probe vorl-probe"></span>vorläufig (schraffiert)</li>
+  </ul>`;
+}
+
+function ariaLabel(i) {
+  const teile = [`${wtLang(i.datum)} ${datumDE(i.datum)}`];
+  if (i.nacht) teile.push(`Nacht bei ${NAME[i.nacht]}`);
+  if (i.ausgleich) teile.push('Ausgleich');
+  for (const w of i.wechsel) teile.push(`${uhr(w.zeit)} Uhr Übergabe an ${NAME[w.an]}`);
+  if (i.ferien) teile.push(FERIEN_NAMEN[i.ferien]);
+  if (i.feiertag) teile.push(i.feiertag);
+  for (const t of i.termine) teile.push(`Termin ${t.titel}`);
+  if (i.offen.length) teile.push('offener Antrag');
+  if (i.vorlaeufig) teile.push('vorläufig, Ferientermine fehlen');
+  return teile.join(', ');
+}
+
+function zelle(d, tag, monat, statisch) {
+  if (Z.monat(tag) !== monat) return '<span class="tag leer"></span>';
+  const i = tagInfo(d, tag);
+  const k = ['tag'];
+  if (i.vorPlan) k.push('vorplan');
+  else if (i.nacht) k.push(`n-${i.nacht}`);
+  if (i.ausgleich) k.push('ausgleich');
+  if (i.vorlaeufig) k.push('vorl');
+  if (i.offen.length) k.push('offen');
+  if (i.ferien) k.push('ferien');
+  if (i.feiertag) k.push('feiertag');
+  if (Z.tag(d.jetzt) === tag) k.push('heute');
+  const inner = `<span class="n">${Z.formatDatum(tag).slice(8)}</span>`
+    + `<span class="m">${i.nacht ? (i.ausgleich ? 'A' : BUCHSTABE[i.nacht]) : ''}${i.ferien ? '<b class="f">F</b>' : ''}${i.feiertag ? '<b class="ft" aria-hidden="true">★</b>' : ''}${i.termine.length ? '<b class="tm" aria-hidden="true">●</b>' : ''}</span>`
+    + i.wechsel.slice(0, 3).map((w) => `<span class="u">${uhr(w.zeit)}</span>`).join('');
+  if (statisch) return `<div class="${k.join(' ')}">${inner}</div>`;
+  return `<button type="button" class="${k.join(' ')}" data-act="tag" data-tag="${i.datum}" aria-label="${esc(ariaLabel(i))}">${inner}</button>`;
+}
+
+function monatGitter(d, jahr, monat, statisch = false) {
+  const kopf = ['Mo', 'Di', 'Mi', 'Do', 'Fr', 'Sa', 'So'].map((x) => `<span class="kopf">${x}</span>`).join('');
+  return `<div class="gitter">${kopf}${monatsTage(jahr, monat).map((t) => zelle(d, t, monat, statisch)).join('')}</div>`;
+}
+
+/** Feiertags- und Ferienliste sowie Vorläufig-Hinweis unter dem Monat. */
+function monatHinweise(d, jahr, monat) {
+  const tage = monatsTage(jahr, monat).filter((t) => Z.monat(t) === monat);
+  const ft = Object.entries(feiertage(jahr)).filter(([k]) => +k.slice(5, 7) === monat);
+  const ferien = new Map();
+  for (const t of tage) {
+    const i = tagInfo(d, t);
+    if (i.ferien && !ferien.has(i.ferien)) ferien.set(i.ferien, true);
+  }
+  const vorl = tage.some((t) => tagInfo(d, t).vorlaeufig);
+  const zeilen = [];
+  if (vorl) zeilen.push('<p class="hinweis warn"><b>vorläufig – Ferientermine fehlen</b>: In diesem Zeitraum gilt nur der Grundrhythmus.</p>');
+  if (ft.length) zeilen.push(`<p class="klein"><b>Feiertage:</b> ${ft.map(([k, n]) => `${k.slice(8)}.${k.slice(5, 7)}. ${esc(n)}`).join(' · ')}</p>`);
+  if (ferien.size) zeilen.push(`<p class="klein"><b>Ferien:</b> ${[...ferien.keys()].map((a) => FERIEN_NAMEN[a]).join(', ')}</p>`);
+  return zeilen.join('');
+}
+
+function monatNav(jahr, monat) {
+  const vor = monat === 1 ? [jahr - 1, 12] : [jahr, monat - 1];
+  const nach = monat === 12 ? [jahr + 1, 1] : [jahr, monat + 1];
+  const z = (a) => `${a[0]}-${String(a[1]).padStart(2, '0')}`;
+  return `<div class="monatnav">
+    <a class="knopf" href="#/kalender/${z(vor)}" aria-label="Vorheriger Monat">‹</a>
+    <h2>${monatsname(jahr, monat)}</h2>
+    <a class="knopf" href="#/kalender/${z(nach)}" aria-label="Nächster Monat">›</a>
+  </div>`;
+}
+
+function kalenderSeite(d, state) {
+  const { jahr, monat } = state.monat;
+  return `${monatNav(jahr, monat)}
+    ${monatGitter(d, jahr, monat)}
+    ${monatHinweise(d, jahr, monat)}
+    ${legendeHtml()}
+    <p class="aktionen"><a class="knopf" href="#/druck/monat/${jahr}-${String(monat).padStart(2, '0')}">Druckansicht</a>
+    <a class="knopf" href="#/jahr/${jahr}">Jahresübersicht</a></p>`;
+}
+
+// ---------------------------------------------------------------------------
+
+function miniZelle(d, tag, monat) {
+  if (Z.monat(tag) !== monat) return '<i class="mt leer"></i>';
+  const i = tagInfo(d, tag);
+  const k = ['mt'];
+  if (i.vorPlan) k.push('vorplan');
+  else if (i.nacht) k.push(`n-${i.nacht}`);
+  if (i.ausgleich) k.push('ausgleich');
+  if (i.vorlaeufig) k.push('vorl');
+  if (i.ferien) k.push('ferien');
+  if (i.offen.length) k.push('offen');
+  return `<i class="${k.join(' ')}">${Z.formatDatum(tag).slice(9)}</i>`;
+}
+
+function jahrMonate(d, jahr, statisch = false) {
+  const monate = [];
+  for (let m = 1; m <= 12; m++) {
+    const kopf = statisch
+      ? `<h3>${MONATE[m - 1]}</h3>`
+      : `<h3><a href="#/kalender/${jahr}-${String(m).padStart(2, '0')}">${MONATE[m - 1]}</a></h3>`;
+    monate.push(`<div class="mini">${kopf}<div class="minigitter">${monatsTage(jahr, m).map((t) => miniZelle(d, t, m)).join('')}</div></div>`);
+  }
+  return `<div class="jahrgitter">${monate.join('')}</div>`;
+}
+
+function jahrChips(d, aktiv, basis) {
+  return `<div class="chips" role="tablist">${d.jahre.map((j) => `<a class="chip${j.jahr === aktiv ? ' aktiv' : ''}" href="#/${basis}/${j.jahr}">${j.jahr}</a>`).join('')}</div>`;
+}
+
+function jahrSeite(d, state) {
+  const j = d.jahre.find((x) => x.jahr === state.jahr) ?? d.jahre[0];
+  return `<h2>Jahresübersicht Betreuungsjahr ${j.jahr}</h2>
+    <p class="klein">${datumDE(j.von)} bis ${datumDE(j.bis)}. Ferientage sind unterstrichen.</p>
+    ${jahrChips(d, j.jahr, 'jahr')}
+    ${jahrMonate(d, j.jahr)}
+    ${legendeHtml()}
+    <p class="aktionen"><a class="knopf" href="#/druck/jahr/${j.jahr}">Druckansicht</a></p>`;
+}
+
+return { FERIEN_NAMEN, legendeHtml, monatGitter, monatHinweise, kalenderSeite, jahrMonate, jahrChips, jahrSeite };
+};
+__f['ui/start.js'] = function () {
+// Startseite: nächste Übergabe, offene Anträge, Saldo des Betreuungsjahres, darunter der aktuelle Monat.
+
+const Z = __r('engine/zeit.js');
+const { naechsteUebergabe, saldoBetreuungsjahr } = __r('ui/daten.js');
+const { NAME, esc, wtDatumUhr, saldoText, datumDE, wtLang } = __r('ui/util.js');
+const { monatGitter, monatHinweise, legendeHtml } = __r('ui/kalender.js');
+const { monatsname } = __r('ui/util.js');
+
+function inTagen(d, zeit) {
+  const diff = Math.floor((Z.tag(Z.parse(zeit)) - Z.tag(d.jetzt)) / Z.MINUTEN_PRO_TAG);
+  if (diff === 0) return 'heute';
+  if (diff === 1) return 'morgen';
+  return `in ${diff} Tagen`;
+}
+
+function startSeite(d) {
+  const u = naechsteUebergabe(d);
+  const mir = d.offen.filter((a) => a.antragsteller !== d.ich.kontoId).length;
+  const eigene = d.offen.length - mir;
+  const { jahr: bj, k } = saldoBetreuungsjahr(d);
+  const vorPlanbeginn = d.jetzt < d.planVon;
+
+  const uebergabe = u
+    ? `<p class="gross"><span class="wer ${u.an}">${wtDatumUhr(u.zeit)} an ${NAME[u.an]}</span></p>
+       <p class="klein">${inTagen(d, u.zeit)} · von ${NAME[u.von]} · ${esc(u.grund)}</p>`
+    : '<p class="klein">Keine weitere Übergabe berechnet.</p>';
+
+  const antraege = d.offen.length
+    ? `<p class="gross"><a class="${mir ? 'dringend' : ''}" href="#/antraege" data-act="filterOffen">${d.offen.length} offene${d.offen.length === 1 ? 'r Antrag' : ' Anträge'}</a></p>
+       <p class="klein">${mir ? `${mir} warte${mir === 1 ? 't' : 'n'} auf deine Entscheidung` : 'Alle warten auf den anderen Elternteil'}${mir && eigene ? `, ${eigene} von dir` : ''}</p>`
+    : '<p class="gross">Keine offenen Anträge</p>';
+
+  const fehlend = d.vorlaeufigAb !== null && d.vorlaeufigAb < d.jetzt + 365 * Z.MINUTEN_PRO_TAG;
+  const hinweis = fehlend
+    ? `<p class="hinweis warn"><b>Ferientermine fehlen</b> ab ${datumDE(Z.format(d.vorlaeufigAb))}. Der Plan zeigt dort nur den Grundrhythmus. <a href="#/ferien">Ferientermine</a></p>`
+    : '';
+
+  const mamaHinweis = d.rollen.mama
+    ? ''
+    : '<p class="hinweis">Mama ist noch nicht verbunden. Sie wird automatisch verbunden, wenn sie den Plan zum ersten Mal öffnet.</p>';
+  const ref = vorPlanbeginn ? d.planVon : d.jetzt;
+  const jahr = Z.jahr(ref);
+  const monat = Z.monat(ref);
+
+  return `<section class="start" aria-label="Überblick">
+      <div class="karte"><h2>Nächste Übergabe</h2>${uebergabe}</div>
+      <div class="karte"><h2>Anträge</h2>${antraege}</div>
+      <div class="karte"><h2>Bilanz Betreuungsjahr ${bj ?? ''}</h2>
+        <p class="gross">${vorPlanbeginn ? 'Plan startet ' + datumDE(Z.format(d.planVon)) : esc(saldoText(k))}</p>
+        <p class="klein">${vorPlanbeginn ? 'Noch keine Zeit gezählt' : `Papa ${k.naechte.papa} · Mama ${k.naechte.mama} Nächte · <a href="#/statistik">Statistik</a>`}</p></div>
+    </section>
+    ${hinweis}${mamaHinweis}
+    <section aria-label="Monatskalender">
+      <h2 class="monat"><a href="#/kalender/${jahr}-${String(monat).padStart(2, '0')}">${monatsname(jahr, monat)}</a></h2>
+      ${monatGitter(d, jahr, monat)}
+      ${monatHinweise(d, jahr, monat)}
+      ${legendeHtml()}
+    </section>`;
+}
+
+return { startSeite };
+};
+__f['ui/parameter.js'] = function () {
+// Beschreibung der Regelparameter für Regeländerungen und die Klartext-Ansicht.
+
+const { NAME, datumUhrDE } = __r('ui/util.js');
+
+const PARAMETER = [
+  { id: 'schulbeginn', pfad: ['schulbeginn'], label: 'Schulbeginn (Uhrzeit)', typ: 'zeit' },
+  { id: 'rhythmus.referenzBeginn', pfad: ['rhythmus', 'referenzBeginn'], label: 'Rhythmus: Referenz-Wechselzeitpunkt', typ: 'datumzeit' },
+  { id: 'rhythmus.referenzBei', pfad: ['rhythmus', 'referenzBei'], label: 'Rhythmus: Lotte ist ab dem Referenzzeitpunkt bei', typ: 'eltern' },
+  { id: 'rhythmus.zyklusTage', pfad: ['rhythmus', 'zyklusTage'], label: 'Rhythmus: Tage je Abschnitt', typ: 'zahl' },
+  { id: 'sommerrotation.ersteHaelfteBei', pfad: ['sommerrotation', 'ersteHaelfteBei'], label: 'Sommerrotation: erste Sommerhälfte (Bezugsjahr 2027) bei', typ: 'eltern' },
+  { id: 'weihnachtsrotation.bei', pfad: ['weihnachtsrotation', 'bei'], label: 'Weihnachtsrotation: Weihnachtsblock (Bezugsjahr 2027) bei', typ: 'eltern' },
+  { id: 'fruehjahrHerbst.beginnZeit', pfad: ['fruehjahrHerbst', 'beginnZeit'], label: 'Frühjahr/Herbst: Beginn am Sonntag', typ: 'zeit' },
+  { id: 'fruehjahrHerbst.endeZeit', pfad: ['fruehjahrHerbst', 'endeZeit'], label: 'Frühjahr/Herbst: Ende am Freitag', typ: 'zeit' },
+  { id: 'osternPfingsten.startZeit', pfad: ['osternPfingsten', 'startZeit'], label: 'Ostern/Pfingsten: Start am Freitag', typ: 'zeit' },
+  { id: 'osternPfingsten.wechselZeit', pfad: ['osternPfingsten', 'wechselZeit'], label: 'Ostern/Pfingsten: Wechsel am Sonntag', typ: 'zeit' },
+  { id: 'sommer.hortwocheTage', pfad: ['sommer', 'hortwocheTage'], label: 'Sommer: Hortwoche in Kalendertagen', typ: 'zahl' },
+  { id: 'sommer.sonderbetreuungAb', pfad: ['sommer', 'sonderbetreuungAb'], label: 'Sommer: Sonderbetreuung ab', typ: 'zeit' },
+  { id: 'sommer.mitteUebergabe', pfad: ['sommer', 'mitteUebergabe'], label: 'Sommer: Mitte-Übergabe um', typ: 'zeit' },
+  { id: 'weihnachten.beginn.zeit', pfad: ['weihnachten', 'beginn', 'zeit'], label: 'Weihnachten: Beginn am 24.12. um', typ: 'zeit' },
+  { id: 'weihnachten.ende.zeit', pfad: ['weihnachten', 'ende', 'zeit'], label: 'Weihnachten: Ende am 31.12. um', typ: 'zeit' },
+  { id: 'unterdrueckungVorWeihnachtenStunden', pfad: ['unterdrueckungVorWeihnachtenStunden'], label: 'Unterdrückung Freitagswechsel: Stunden vor Weihnachtsblock', typ: 'zahl' },
+];
+
+const holePfad = (obj, pfad) => pfad.reduce((o, k) => (o == null ? undefined : o[k]), obj);
+const patchAus = (pfad, wert) => pfad.reduceRight((acc, k) => ({ [k]: acc }), wert);
+
+function wertText(p, wert) {
+  if (wert === undefined || wert === null) return '–';
+  if (p?.typ === 'eltern') return NAME[wert] ?? wert;
+  if (p?.typ === 'datumzeit') return datumUhrDE(String(wert));
+  if (p?.typ === 'zeit') return `${wert} Uhr`;
+  return String(wert);
+}
+
+function blaetter(obj, pfad = []) {
+  if (obj && typeof obj === 'object' && !Array.isArray(obj)) return Object.entries(obj).flatMap(([k, v]) => blaetter(v, [...pfad, k]));
+  return [{ pfad, wert: obj }];
+}
+
+/** Lesbare Zeilen "Label: Wert" für einen Parameter-Patch. */
+function parameterZeilen(parameter) {
+  return blaetter(parameter).map(({ pfad, wert }) => {
+    const p = PARAMETER.find((x) => x.id === pfad.join('.'));
+    return `${p?.label ?? pfad.join('.')}: ${wertText(p, wert)}`;
+  });
+}
+
+return { PARAMETER, holePfad, patchAus, wertText, parameterZeilen };
+};
+__f['ui/listen.js'] = function () {
+// Übergaben, Anträge, Verlauf, Ferientermine, Regeln.
+
+const Z = __r('engine/zeit.js');
+const { ersterSchultag } = __r('engine/engine.js');
+const { ausgleichDifferenz, FERIENARTEN } = __r('app/dienst.js');
+const {
+  NAME, ARTEN_TEXT, STATUS_TEXT, esc, wtDatumUhr, datumDE, datumUhrDE, wtLang, uhr, zahl,
+} = __r('ui/util.js');
+const { FERIEN_NAMEN, jahrChips } = __r('ui/kalender.js');
+const { parameterZeilen, PARAMETER, holePfad, wertText } = __r('ui/parameter.js');
+const { betreuungsjahrZu } = __r('ui/daten.js');
+
+const wer = (p) => `<span class="wer ${p}">${NAME[p]}</span>`;
+const person = (d, kontoId) => {
+  if (kontoId === 'system') return 'System';
+  if (kontoId === d.rollen.papa) return 'Papa';
+  if (kontoId === d.rollen.mama) return 'Mama';
+  return 'Unbekannt';
+};
+
+// ---------------------------------------------------------------------------
+// Übergaben
+
+function uebergabenSeite(d, state) {
+  const j = d.jahre.find((x) => x.jahr === state.jahr) ?? betreuungsjahrZu(d, d.jetzt) ?? d.jahre[0];
+  const von = Z.parse(j.von);
+  const bis = Z.parse(j.bis);
+  const liste = d.plan.uebergaben.filter((u) => Z.parse(u.zeit) >= von && Z.parse(u.zeit) <= bis);
+  const zeilen = liste.map((u) => {
+    const vergangen = Z.parse(u.zeit) <= d.jetzt;
+    return `<li class="${vergangen ? 'vergangen' : ''}">
+      <span class="zeit">${esc(wtDatumUhr(u.zeit))}</span>
+      <span class="richtung">${wer(u.von)} → ${wer(u.an)}</span>
+      <span class="grund">${esc(u.grund)}</span></li>`;
+  }).join('');
+  return `<h2>Übergaben Betreuungsjahr ${j.jahr}</h2>
+    ${jahrChips(d, j.jahr, 'uebergaben')}
+    <p class="klein">${liste.length} Wechsel, ${datumDE(j.von)} bis ${datumDE(j.bis)}</p>
+    <ul class="liste uebergaben">${zeilen}</ul>`;
+}
+
+// ---------------------------------------------------------------------------
+// Anträge
+
+function antragZeitraum(a) {
+  if (a.art === 'regelaenderung') return `ab ${datumUhrDE(a.gueltigAb)}`;
+  return `${wtDatumUhr(a.von)} – ${wtDatumUhr(a.bis)}`;
+}
+
+function antragKarte(d, a, alle) {
+  const meiner = a.antragsteller === d.ich.kontoId;
+  const text = [];
+  if (a.art === 'regelaenderung') {
+    text.push(...parameterZeilen(a.parameter).map((z) => `<li>${esc(z)}</li>`));
+  } else {
+    text.push(`<li>${esc(antragZeitraum(a))}${a.art === 'storno' ? '' : ` · Lotte bei ${wer(a.bei)}`}</li>`);
+    if (a.ausgleich) {
+      text.push(`<li>Ausgleich: ${esc(wtDatumUhr(a.ausgleich.von))} – ${esc(wtDatumUhr(a.ausgleich.bis))} bei ${wer(a.ausgleich.bei)} · <b>${esc(ausgleichDifferenz(a).text)}</b></li>`);
+    }
+  }
+  const bezug = a.bezug?.ausnahme ? alle.find((x) => x.id === a.bezug.ausnahme) : null;
+  const marken = [];
+  if (a.nachtraeglich) marken.push('<span class="marke">nachträglich</span>');
+  if (a.markierung === 'regel_geaendert') marken.push('<span class="marke warn">Regel geändert – Ausnahme noch sinnvoll?</span>');
+  if (a.bezug?.gegenvorschlagZu) marken.push('<span class="marke">Gegenvorschlag</span>');
+
+  const knoepfe = [];
+  if (a.status === 'offen') {
+    if (meiner) knoepfe.push(`<button class="knopf" data-act="zurueckziehen" data-id="${a.id}">Zurückziehen</button>`);
+    else {
+      knoepfe.push(`<button class="knopf primaer" data-act="bestaetigen" data-id="${a.id}">Bestätigen</button>`);
+      knoepfe.push(`<button class="knopf" data-act="ablehnenDialog" data-id="${a.id}">Ablehnen …</button>`);
+    }
+  }
+  if (a.status === 'bestaetigt' && ['ausnahme', 'ausnahme_mit_ausgleich', 'weihnachtsbesuch', 'aenderung'].includes(a.art)) {
+    knoepfe.push(`<button class="knopf" data-act="aenderungDialog" data-id="${a.id}">Ändern …</button>`);
+    knoepfe.push(`<button class="knopf" data-act="stornoDialog" data-id="${a.id}">Stornieren …</button>`);
+  }
+
+  return `<article class="karte antrag st-${a.status}" id="antrag-${a.id}">
+    <header><h3>${ARTEN_TEXT[a.art]}</h3><span class="status st-${a.status}">${STATUS_TEXT[a.status]}</span></header>
+    <ul class="zeilen">${text.join('')}</ul>
+    ${bezug ? `<p class="klein">Bezieht sich auf: ${esc(antragZeitraum(bezug))}</p>` : ''}
+    ${a.begruendung ? `<p>${esc(a.begruendung)}</p>` : ''}
+    ${a.kommentar ? `<p class="kommentar"><b>Kommentar:</b> ${esc(a.kommentar)}</p>` : ''}
+    <p class="klein">${esc(person(d, a.antragsteller))} · gestellt ${esc(datumUhrDE(a.erstellt))}${a.entschieden ? ` · entschieden ${esc(datumUhrDE(a.entschieden))} (${esc(person(d, a.entschiedenVon))})` : ''}</p>
+    ${marken.length ? `<p>${marken.join(' ')}</p>` : ''}
+    ${knoepfe.length ? `<div class="aktionen">${knoepfe.join('')}</div>` : ''}
+  </article>`;
+}
+
+function antraegeSeite(d, state) {
+  const f = state.antragFilter;
+  const statusGruppen = { offen: ['offen'], entschieden: ['bestaetigt', 'abgelehnt', 'zurueckgezogen', 'ersetzt', 'storniert'], verfallen: ['verfallen'] };
+  let liste = [...d.antraege].sort((a, b) => (a.erstellt < b.erstellt ? 1 : a.erstellt > b.erstellt ? -1 : 0));
+  if (f.status !== 'alle') liste = liste.filter((a) => statusGruppen[f.status].includes(a.status));
+  if (f.person !== 'alle') {
+    liste = liste.filter((a) => a.antragsteller === d.rollen[f.person]);
+  }
+  const chip = (gruppe, wert, text) => `<button class="chip${f[gruppe] === wert ? ' aktiv' : ''}" data-act="filter" data-gruppe="${gruppe}" data-wert="${wert}">${text}</button>`;
+  return `<div class="kopfzeile"><h2>Anträge</h2><button class="knopf primaer" data-act="neuerAntrag">Neu</button></div>
+    <div class="chips">${chip('status', 'offen', 'Offen')}${chip('status', 'entschieden', 'Entschieden')}${chip('status', 'verfallen', 'Verfallen')}${chip('status', 'alle', 'Alle')}</div>
+    <div class="chips">${chip('person', 'alle', 'Beide')}${chip('person', 'papa', 'Von Papa')}${chip('person', 'mama', 'Von Mama')}</div>
+    ${liste.length ? liste.map((a) => antragKarte(d, a, d.antraege)).join('') : '<p class="leer">Keine Anträge in dieser Auswahl.</p>'}`;
+}
+
+// ---------------------------------------------------------------------------
+// Verlauf
+
+const EREIGNIS_TEXT = {
+  einrichtung: 'Plan eingerichtet',
+  antrag_gestellt: 'Antrag gestellt',
+  antrag_bestaetigt: 'Antrag bestätigt',
+  antrag_abgelehnt: 'Antrag abgelehnt',
+  gegenvorschlag: 'Gegenvorschlag gemacht',
+  antrag_zurueckgezogen: 'Antrag zurückgezogen',
+  antrag_verfallen: 'Antrag verfallen (keine Antwort bis zum Beginn)',
+  ausnahme_storniert: 'Ausnahme storniert',
+  ausnahme_ersetzt: 'Ausnahme ersetzt',
+  regelaenderung_beantragt: 'Regeländerung beantragt',
+  regelaenderung_bestaetigt: 'Regeländerung bestätigt',
+  regelaenderung_abgelehnt: 'Regeländerung abgelehnt',
+  ferien_angelegt: 'Ferientermin angelegt',
+  ferien_geaendert: 'Ferientermin geändert',
+  sicherung_eingespielt: 'Sicherung eingespielt',
+  mama_verbunden: 'Konto von Mama verbunden',
+  termin_angelegt: 'Termin angelegt',
+  termin_geaendert: 'Termin geändert',
+  termin_abgesagt: 'Termin abgesagt',
+};
+
+const ferienText = (f) => (f ? `${FERIEN_NAMEN[f.art] ?? f.art} ${f.schuljahr}: ${datumDE(f.erster)} bis ${datumDE(f.letzter)}${f.schulbeginn ? `, Schulbeginn ${datumDE(f.schulbeginn)}` : ''}` : '–');
+
+function verlaufText(d, v) {
+  const a = d.antraege.find((x) => x.id === v.bezug);
+  let detail = '';
+  if (v.ereignis.startsWith('termin_')) {
+    const t = d.termine.find((x) => x.id === v.bezug);
+    const n = typeof v.neu === 'object' && v.neu ? v.neu : t;
+    detail = n ? `${n.titel}, ${datumUhrDE(n.von)}${v.alt && typeof v.alt === 'object' && v.alt.von !== n.von ? ` (vorher ${datumUhrDE(v.alt.von)})` : ''}` : '';
+  } else if (v.ereignis.startsWith('ferien_')) detail = `${v.alt ? `alt: ${ferienText(v.alt)} → ` : ''}neu: ${ferienText(v.neu)}`;
+  else if (a && v.ereignis !== 'gegenvorschlag') detail = `${ARTEN_TEXT[a.art]}: ${a.art === 'regelaenderung' ? parameterZeilen(a.parameter).join('; ') : antragZeitraum(a)}`;
+  else if (v.ereignis === 'gegenvorschlag' && v.neu) detail = `${ARTEN_TEXT[v.neu.art]}: ${v.neu.art === 'regelaenderung' ? '' : antragZeitraum(v.neu)}`;
+  const komm = v.neu && typeof v.neu === 'object' && v.neu.kommentar ? `Kommentar: ${v.neu.kommentar}` : '';
+  return { titel: EREIGNIS_TEXT[v.ereignis] ?? v.ereignis, detail, komm };
+}
+
+function verlaufSeite(d) {
+  const liste = [...d.verlauf].reverse().map((v) => {
+    const t = verlaufText(d, v);
+    return `<li><span class="zeit">${esc(datumUhrDE(v.zeit))}</span> <b>${esc(person(d, v.kontoId))}</b>: ${esc(t.titel)}
+      ${t.detail ? `<div class="klein">${esc(t.detail)}</div>` : ''}${t.komm ? `<div class="klein">${esc(t.komm)}</div>` : ''}</li>`;
+  }).join('');
+  return `<h2>Verlauf</h2><p class="klein">Unveränderlich und für beide sichtbar. ${d.verlauf.length} Einträge.</p>
+    <ul class="liste verlauf">${liste}</ul>
+    <p class="aktionen"><a class="knopf" href="#/export">Exportieren</a> <a class="knopf" href="#/druck/verlauf">Druckbare Liste</a></p>`;
+}
+
+function verlaufCsv(d) {
+  const q = (s) => `"${String(s ?? '').replace(/"/g, '""')}"`;
+  const zeilen = [['Zeit', 'Person', 'Ereignis', 'Antrag/Bezug', 'Detail', 'Kommentar', 'Alt', 'Neu'].map(q).join(';')];
+  for (const v of d.verlauf) {
+    const t = verlaufText(d, v);
+    zeilen.push([v.zeit, person(d, v.kontoId), t.titel, v.bezug, t.detail, t.komm.replace(/^Kommentar: /, ''), v.alt ? JSON.stringify(v.alt) : '', v.neu ? JSON.stringify(v.neu) : ''].map(q).join(';'));
+  }
+  return String.fromCharCode(0xFEFF) + zeilen.join('\r\n') + '\r\n';
+}
+
+// ---------------------------------------------------------------------------
+// Ferientermine
+
+function ferienSeite(d) {
+  const ichPapa = d.ich.rolle === 'papa';
+  const nachJahr = new Map();
+  for (const f of [...d.ferien].sort((a, b) => (a.erster < b.erster ? -1 : 1))) {
+    if (!nachJahr.has(f.schuljahr)) nachJahr.set(f.schuljahr, []);
+    nachJahr.get(f.schuljahr).push(f);
+  }
+  const tabellen = [...nachJahr.entries()].sort().map(([jahr, liste]) => `
+    <h3>Schuljahr ${esc(jahr)}</h3>
+    <div class="tabellenrahmen"><table>
+      <thead><tr><th>Ferien</th><th>Erster Tag</th><th>Letzter Tag</th><th>Schulbeginn</th>${ichPapa ? '<th></th>' : ''}</tr></thead>
+      <tbody>${liste.map((f) => {
+    const berechnet = ersterSchultag(f.letzter);
+    return `<tr><td>${FERIEN_NAMEN[f.art]}</td><td>${datumDE(f.erster)}</td><td>${datumDE(f.letzter)}</td>
+          <td>${datumDE(f.schulbeginn ?? Z.formatDatum(berechnet))}${f.schulbeginn ? ' <span class="marke">manuell</span>' : ''}</td>
+          ${ichPapa ? `<td><button class="knopf klein-knopf" data-act="ferienDialog" data-id="${esc(f.id)}">Ändern</button></td>` : ''}</tr>`;
+  }).join('')}</tbody></table></div>`).join('');
+  const hinweis = d.vorlaeufigAb !== null
+    ? `<p class="hinweis warn">Ferientermine liegen bis Schulbeginn ${datumDE(Z.format(d.vorlaeufigAb))} vor. Danach zeigt der Kalender nur den Grundrhythmus, markiert als <b>vorläufig – Ferientermine fehlen</b>.</p>` : '';
+  return `<div class="kopfzeile"><h2>Ferientermine</h2>${ichPapa ? '<button class="knopf primaer" data-act="ferienDialog">Neu</button>' : ''}</div>
+    <p class="klein">Quelle der mitgelieferten Termine: BayMBl. 2022 Nr. 747. ${ichPapa ? 'Papa pflegt weitere Jahre hier selbst nach; Mama muss nicht bestätigen.' : 'Nur Papa kann Ferientermine bearbeiten.'} Der Schulbeginn wird nach Regel 10 berechnet.</p>
+    ${hinweis}${tabellen}`;
+}
+
+// ---------------------------------------------------------------------------
+// Regeln
+
+function regelnSeite(d) {
+  const jetzt = Z.format(d.jetzt);
+  const gueltig = d.regeln.filter((r) => r.gueltigAb <= jetzt).at(-1) ?? d.regeln[0];
+  const r = gueltig;
+  const ref = r.rhythmus.referenzBeginn;
+  const w = r.weihnachten;
+  const text = [
+    `<b>Grundrhythmus.</b> ${r.rhythmus.zyklusTage}/${r.rhythmus.zyklusTage}, Wechsel ${wtLang(ref)}s ${uhr(ref)} Uhr. Referenzwoche ab ${datumUhrDE(ref)} bei ${NAME[r.rhythmus.referenzBei]}; vorwärts und rückwärts durchgerechnet.`,
+    `<b>Ferienrotation.</b> Erste Sommerhälfte ${r.sommerrotation.jahr} bei ${NAME[r.sommerrotation.ersteHaelfteBei]}, danach jährlich wechselnd. Wer die erste Sommerhälfte hat, hat auch den Herbst; wer die zweite hat, das Frühjahr.`,
+    `<b>Frühjahr und Herbst.</b> Sonntag vor der Ferienwoche ${r.fruehjahrHerbst.beginnZeit} Uhr bis Freitag der Ferienwoche ${r.fruehjahrHerbst.endeZeit} Uhr. Wochenenden außerhalb bleiben im Rhythmus, Feiertage im Block werden nicht herausgerechnet.`,
+    '<b>Werktagstausch.</b> Gehört der Block laut Rhythmus (Stand Blockbeginn) dem anderen Elternteil, bekommt dieser den gleich langen Block der unmittelbaren Folgewoche. Sonst entfällt der Tausch.',
+    `<b>Ostern und Pfingsten.</b> Start Freitag ${r.osternPfingsten.startZeit} Uhr beim laut Rhythmus Zuständigen, Wechsel Sonntag ${r.osternPfingsten.wechselZeit} Uhr, Ende zum Schulbeginn (${r.schulbeginn} Uhr). Kein weiterer Ausgleich.`,
+    `<b>Sommer.</b> Die ersten ${r.sommer.hortwocheTage} Kalendertage ab dem ersten Ferientag laufen im Rhythmus (Hortwoche). Danach Sonderbetreuung ab ${r.sommer.sonderbetreuungAb} Uhr bis Schulbeginn; die Mitte-Übergabe ist am Kalendertag der rechnerischen Mitte um ${r.sommer.mitteUebergabe} Uhr.`,
+    `<b>Weihnachten.</b> ${w.beginn.tag}.${w.beginn.monat}. ${w.beginn.zeit} Uhr bis ${w.ende.tag}.${w.ende.monat}. ${w.ende.zeit} Uhr beim Elternteil der Weihnachtsrotation (${r.weihnachtsrotation.jahr}: ${NAME[r.weihnachtsrotation.bei]}), jährlich wechselnd.`,
+    `<b>Neujahr.</b> Vom Ende des Weihnachtsblocks bis zum Schulbeginn im Januar beim anderen Elternteil, danach läuft der Rhythmus unverändert weiter.`,
+    `<b>Heiligabend-Regel.</b> Fällt eine Rhythmus-Übergabe in die ${r.unterdrueckungVorWeihnachtenStunden} Stunden vor Beginn des Weihnachtsblocks, entfällt sie.`,
+    '<b>Erster Schultag.</b> Der nächste Unterrichtstag nach dem letzten Ferientag; Wochenenden und der 06.01. werden übersprungen.',
+    '<b>Feiertage</b> (Bayern, plus Buß- und Bettag) werden im Kalender benannt und ändern keine Zuordnung.',
+  ];
+  const versionen = d.regeln.map((v) => `<li>ab ${esc(datumUhrDE(v.gueltigAb))}${v.antragId ? '' : ' (Ausgangsfassung)'}</li>`).join('');
+  const tabelle = PARAMETER.map((p) => `<tr><td>${esc(p.label)}</td><td>${esc(wertText(p, holePfad(r, p.pfad)))}</td></tr>`).join('');
+  const offen = d.offen.filter((a) => a.art === 'regelaenderung');
+  return `<div class="kopfzeile"><h2>Regeln</h2><button class="knopf primaer" data-act="regelDialog">Änderung beantragen</button></div>
+    <p class="klein">Stand ab ${esc(datumUhrDE(r.gueltigAb))}. Priorität: bestätigte Ausnahme vor Ferienregel vor Grundrhythmus. Alle Zeiträume von Beginn einschließlich bis Ende ausschließlich, lokale Zeit Europe/Berlin.</p>
+    ${offen.length ? `<p class="hinweis warn">${offen.length} Regeländerung wartet auf Entscheidung. <a href="#/antraege" data-act="filterOffen">Zu den Anträgen</a></p>` : ''}
+    <ol class="regeltext">${text.map((t) => `<li>${t}</li>`).join('')}</ol>
+    <h3>Aktuelle Parameter</h3>
+    <div class="tabellenrahmen"><table><tbody>${tabelle}</tbody></table></div>
+    <h3>Gültigkeit</h3><ul>${versionen}</ul>
+    <p class="klein">Eine Änderung wird beantragt, bestätigt und gilt ab einem Stichtag. Die Vergangenheit bleibt unverändert.</p>`;
+}
+
+return { uebergabenSeite, antragKarte, antraegeSeite, verlaufText, verlaufSeite, verlaufCsv, ferienSeite, regelnSeite };
+};
+__f['ui/statistik-ansicht.js'] = function () {
+// Statistik: Bilanz je Betreuungsjahr, Monatsübersicht, Erklärung der Abweichungen, Prüfungen.
+
+const Z = __r('engine/zeit.js');
+const { bilanz } = __r('engine/engine.js');
+const { kennzahlen, monatsuebersicht, abweichungen, pruefungen, addiere, leereBilanz } = __r('engine/statistik.js');
+const {
+  esc, zahl, prozent, mitVorzeichen, saldoText, datumDE, MONATE,
+} = __r('ui/util.js');
+const { jahrChips } = __r('ui/kalender.js');
+
+function bilanzTabelle(k) {
+  return `<div class="tabellenrahmen"><table class="bilanz">
+    <thead><tr><th></th><th><span class="wer papa">Papa</span></th><th><span class="wer mama">Mama</span></th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Nächte</th><td>${k.naechte.papa}</td><td>${k.naechte.mama}</td></tr>
+      <tr><th scope="row">Anteil Nächte</th><td>${prozent(k.anteilNaechte.papa)}</td><td>${prozent(k.anteilNaechte.mama)}</td></tr>
+      <tr><th scope="row">Stunden</th><td>${zahl(k.stunden.papa, 2)}</td><td>${zahl(k.stunden.mama, 2)}</td></tr>
+      <tr><th scope="row">Anteil Stunden</th><td>${prozent(k.anteilStunden.papa)}</td><td>${prozent(k.anteilStunden.mama)}</td></tr>
+      <tr><th scope="row">Tage aus Stunden</th><td>${zahl(k.stunden.papa / 24, 2)}</td><td>${zahl(k.stunden.mama / 24, 2)}</td></tr>
+    </tbody>
+    <tfoot><tr><th scope="row">Abweichung Papa gegenüber 50 %</th><td colspan="2">${mitVorzeichen(k.abweichung.naechte)} Nächte / ${mitVorzeichen(k.abweichung.stunden)} h</td></tr></tfoot>
+  </table></div>`;
+}
+
+function monatsTabelle(monate) {
+  return `<div class="tabellenrahmen"><table class="monate">
+    <thead><tr><th>Monat</th><th>Nächte P / M</th><th>Stunden P / M</th><th>Anteil Nächte P</th><th>Abw. Papa N / h</th></tr></thead>
+    <tbody>${monate.map((m) => {
+    const k = m.kennzahlen;
+    return `<tr><th scope="row">${MONATE[m.monat - 1].slice(0, 3)} ${String(m.jahr).slice(2)}</th><td>${k.naechte.papa} / ${k.naechte.mama}</td>
+        <td>${zahl(k.stunden.papa, 2)} / ${zahl(k.stunden.mama, 2)}</td><td>${prozent(k.anteilNaechte.papa)}</td>
+        <td>${mitVorzeichen(k.abweichung.naechte)} / ${mitVorzeichen(k.abweichung.stunden)}</td></tr>`;
+  }).join('')}</tbody></table></div>`;
+}
+
+function erklaerungTabelle(e) {
+  return `<div class="tabellenrahmen"><table class="erklaerung">
+    <thead><tr><th>Abschnitt</th><th>Nächte (Papa)</th><th>Stunden (Papa)</th></tr></thead>
+    <tbody>${e.zeilen.map((z) => `<tr><th scope="row">${esc(z.abschnitt)}</th><td>${mitVorzeichen(z.naechte, 0)}</td><td>${mitVorzeichen(z.stunden)}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><th scope="row">Summe</th><td>${mitVorzeichen(e.summe.naechte, 0)}</td><td>${mitVorzeichen(e.summe.stunden)}</td></tr></tfoot>
+  </table></div>`;
+}
+
+function statistikSeite(d, state) {
+  const j = d.jahre.find((x) => x.jahr === state.jahr) ?? d.jahre[0];
+  const von = Z.parse(j.von);
+  const bis = Z.parse(j.bis);
+  const k = kennzahlen(bilanz(d.iv, von, bis));
+  const monate = monatsuebersicht(d.iv, von, bis);
+  const e = abweichungen(d.iv, d.rhIv, von, bis);
+  const pr = pruefungen(d.iv, von, bis);
+
+  return `<h2>Statistik</h2>
+    ${jahrChips(d, j.jahr, 'statistik')}
+    <h3>Betreuungsjahr ${j.jahr}</h3>
+    <p class="klein">${datumDE(j.von)} bis ${datumDE(j.bis)}. Bilanz zeigt nur, verschiebt nie selbständig Zeiten.</p>
+    ${bilanzTabelle(k)}
+    <h3>Monatsübersicht</h3>${monatsTabelle(monate)}
+    <details class="aufklapp"><summary>Erklärung der Abweichungen</summary>
+      <p class="klein">Wirkung gegenüber dem reinen Grundrhythmus, aus Sicht von Papa, in diesem Betreuungsjahr.</p>
+      ${erklaerungTabelle(e)}</details>
+    <h3>Prüfungen</h3>
+    <ul class="pruefungen">${pr.map((p) => `<li class="${p.ok ? 'ok' : 'nok'}"><span aria-hidden="true">${p.ok ? '✔' : '✘'}</span> ${esc(p.text)}${p.ok ? '' : ' – <b>nicht erfüllt</b>'}</li>`).join('')}</ul>
+    <p class="aktionen"><a class="knopf" href="#/druck/jahr/${j.jahr}">Druckansicht Betreuungsjahr</a></p>`;
+}
+
+return { bilanzTabelle, monatsTabelle, erklaerungTabelle, statistikSeite };
+};
+__f['app/ics.js'] = function () {
+// Kalenderdatei (iCalendar, .ics) für Betreuungsblöcke und Termine von Lotte.
+// Reine Funktionen ohne Netzwerk. Zeiten bleiben lokale Zeit Europe/Berlin (TZID), keine Umrechnung.
+// Import in Google Kalender: Einstellungen > Importieren, oder Datei auf dem Handy öffnen.
+
+const Z = __r('engine/zeit.js');
+
+const CRLF = '\r\n';
+const NAME = { papa: 'Papa', mama: 'Mama' };
+const TZ = 'Europe/Berlin';
+
+const mapsLink = (ort) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ort)}`;
+
+/** Text-Escape nach RFC 5545. */
+const icsText = (s) => String(s ?? '').replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+
+/** Faltet eine Zeile auf höchstens 75 Oktette (Folgezeilen beginnen mit Leerzeichen); zerteilt keine Zeichen. */
+function falte(zeile) {
+  const enc = new TextEncoder();
+  const teile = [];
+  let aktuell = '';
+  let bytes = 0;
+  let grenze = 75;
+  for (const zeichen of zeile) {
+    const b = enc.encode(zeichen).length;
+    if (bytes + b > grenze) {
+      teile.push(aktuell);
+      aktuell = '';
+      bytes = 0;
+      grenze = 74; // führendes Leerzeichen zählt mit
+    }
+    aktuell += zeichen;
+    bytes += b;
+  }
+  teile.push(aktuell);
+  return teile.join(`${CRLF} `);
+}
+
+const dtLokal = (t) => `${Z.format(t).replace(/[-:]/g, '')}00`;
+const dtDatum = (t) => Z.formatDatum(t).replace(/-/g, '');
+const dtStamp = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
+const datumDE = (t) => `${Z.formatDatum(t).slice(8)}.${Z.formatDatum(t).slice(5, 7)}.${Z.formatDatum(t).slice(0, 4)}`;
+const uhrzeit = (t) => Z.format(t).slice(11);
+const zeitDE = (t) => `${datumDE(t)} ${uhrzeit(t)} Uhr`;
+
+const VTIMEZONE = [
+  'BEGIN:VTIMEZONE', `TZID:${TZ}`,
+  'BEGIN:DAYLIGHT', 'TZOFFSETFROM:+0100', 'TZOFFSETTO:+0200', 'TZNAME:CEST', 'DTSTART:19700329T020000', 'RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=-1SU', 'END:DAYLIGHT',
+  'BEGIN:STANDARD', 'TZOFFSETFROM:+0200', 'TZOFFSETTO:+0100', 'TZNAME:CET', 'DTSTART:19701025T030000', 'RRULE:FREQ=YEARLY;BYMONTH=10;BYDAY=-1SU', 'END:STANDARD',
+  'END:VTIMEZONE',
+];
+
+function kalender(name, ereignisse) {
+  const zeilen = [
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Betreuungsplaner Lotte//DE', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+    `X-WR-CALNAME:${icsText(name)}`, `X-WR-TIMEZONE:${TZ}`, ...VTIMEZONE,
+    ...ereignisse.flat(),
+    'END:VCALENDAR',
+  ];
+  return `${zeilen.map(falte).join(CRLF)}${CRLF}`;
+}
+
+// ---------------------------------------------------------------------------
+// Betreuung
+
+/**
+ * Fasst aufeinanderfolgende Zuständigkeitsintervalle desselben Elternteils zu Blöcken von Übergabe zu Übergabe zusammen.
+ * Vorläufige Intervalle (Ferientermine fehlen) gehören nicht dazu. Gefiltert wird auf Überlappung mit [von, bis).
+ * @param {{von:number,bis:number,bei:string,grund:string,vorlaeufig?:boolean}[]} intervalle Minutenwerte
+ */
+function betreuungsBloecke(intervalle, { von = -Infinity, bis = Infinity } = {}) {
+  const out = [];
+  for (const iv of intervalle) {
+    if (iv.vorlaeufig) continue;
+    const l = out.at(-1);
+    if (l && l.bei === iv.bei && l.ende === iv.von) l.ende = iv.bis;
+    else out.push({ start: iv.von, ende: iv.bis, bei: iv.bei, grund: iv.grund });
+  }
+  return out.filter((b) => b.ende > von && b.start < bis);
+}
+
+function betreuungsIcs(bloecke, { stamp = new Date(), sequenz = 0 } = {}) {
+  const st = dtStamp(stamp);
+  const ereignisse = bloecke.map((b) => {
+    const andere = b.bei === 'papa' ? 'mama' : 'papa';
+    return [
+      'BEGIN:VEVENT',
+      `UID:betreuung-${dtLokal(b.start)}-${b.bei}@betreuungsplaner`,
+      `DTSTAMP:${st}`,
+      `SEQUENCE:${sequenz}`,
+      `DTSTART;TZID=${TZ}:${dtLokal(b.start)}`,
+      `DTEND;TZID=${TZ}:${dtLokal(b.ende)}`,
+      `SUMMARY:${icsText(`Lotte bei ${NAME[b.bei]}`)}`,
+      `DESCRIPTION:${icsText(`Übergabe an ${NAME[b.bei]}: ${zeitDE(b.start)} (${b.grund}).\nNächste Übergabe an ${NAME[andere]}: ${zeitDE(b.ende)}.`)}`,
+      'TRANSP:TRANSPARENT',
+      'END:VEVENT',
+    ];
+  });
+  return kalender('Betreuung Lotte', ereignisse);
+}
+
+// ---------------------------------------------------------------------------
+// Termine von Lotte
+
+/**
+ * @param {{id:string,titel:string,von:string,bis:string,ganztaegig?:boolean,ort?:string,notiz?:string,status?:string,version?:number}[]} termine
+ */
+function termineIcs(termine, { stamp = new Date() } = {}) {
+  const st = dtStamp(stamp);
+  const ereignisse = termine.map((t) => {
+    const von = Z.parse(t.von);
+    const bis = Z.parse(t.bis);
+    const beschreibung = [t.notiz, t.ort ? `Karte: ${mapsLink(t.ort)}` : ''].filter(Boolean).join('\n');
+    const zeit = t.ganztaegig
+      ? [`DTSTART;VALUE=DATE:${dtDatum(von)}`, `DTEND;VALUE=DATE:${dtDatum(Z.plusTage(Z.tag(bis), 1))}`]
+      : [`DTSTART;TZID=${TZ}:${dtLokal(von)}`, `DTEND;TZID=${TZ}:${dtLokal(bis)}`];
+    return [
+      'BEGIN:VEVENT',
+      `UID:termin-${t.id}@betreuungsplaner`,
+      `DTSTAMP:${st}`,
+      `SEQUENCE:${t.version ?? 0}`,
+      ...zeit,
+      `SUMMARY:${icsText(t.titel)}`,
+      ...(t.ort ? [`LOCATION:${icsText(t.ort)}`] : []),
+      ...(beschreibung ? [`DESCRIPTION:${icsText(beschreibung)}`] : []),
+      ...(t.status === 'abgesagt' ? ['STATUS:CANCELLED'] : []),
+      'END:VEVENT',
+    ];
+  });
+  return kalender('Termine Lotte', ereignisse);
+}
+
+return { mapsLink, icsText, falte, betreuungsBloecke, betreuungsIcs, termineIcs };
+};
+__f['ui/termine.js'] = function () {
+// Termine von Lotte: Liste, Kartenlink und Kalenderexport.
+
+const Z = __r('engine/zeit.js');
+const { mapsLink } = __r('app/ics.js');
+const { esc, wtDatumUhr, datumDE, wt } = __r('ui/util.js');
+
+function zeitText(t) {
+  if (t.ganztaegig) {
+    return t.von === t.bis ? `${wt(t.von)} ${datumDE(t.von)} (ganztägig)` : `${wt(t.von)} ${datumDE(t.von)} – ${wt(t.bis)} ${datumDE(t.bis)} (ganztägig)`;
+  }
+  const gleicherTag = t.von.slice(0, 10) === t.bis.slice(0, 10);
+  return gleicherTag ? `${wtDatumUhr(t.von)} – ${t.bis.slice(11)} Uhr` : `${wtDatumUhr(t.von)} – ${wtDatumUhr(t.bis)}`;
+}
+
+function karte(t) {
+  const abgesagt = t.status === 'abgesagt';
+  return `<article class="karte termin${abgesagt ? ' abgesagt' : ''}">
+    <header><h3>${esc(t.titel)}</h3>${abgesagt ? '<span class="status st-abgelehnt">abgesagt</span>' : ''}</header>
+    <p>${esc(zeitText(t))}</p>
+    ${t.ort ? `<p>${esc(t.ort)} · <a href="${esc(mapsLink(t.ort))}" target="_blank" rel="noopener noreferrer">Karte öffnen</a></p>` : ''}
+    ${t.notiz ? `<p class="klein">${esc(t.notiz)}</p>` : ''}
+    ${abgesagt ? '' : `<div class="aktionen"><button class="knopf" data-act="terminDialog" data-id="${esc(t.id)}">Ändern</button><button class="knopf" data-act="terminAbsagenDialog" data-id="${esc(t.id)}">Absagen …</button></div>`}
+  </article>`;
+}
+
+function termineSeite(d) {
+  const heute = Z.tag(d.jetzt);
+  const sortiert = [...d.termine].sort((a, b) => (a.von < b.von ? -1 : 1));
+  const anstehend = sortiert.filter((t) => Z.tag(Z.parse(t.bis)) >= heute);
+  const vergangen = sortiert.filter((t) => Z.tag(Z.parse(t.bis)) < heute).reverse();
+  return `<div class="kopfzeile"><h2>Termine Lotte</h2><button class="knopf primaer" data-act="terminDialog">Neu</button></div>
+    <p class="klein">Arzt, Schule, Verein: für beide sichtbar, ohne Bestätigung. Mit Ort wird ein Google-Maps-Link erzeugt. <a href="#/export">Als Kalenderdatei exportieren</a></p>
+    ${anstehend.length ? anstehend.map(karte).join('') : '<p class="leer">Keine anstehenden Termine.</p>'}
+    ${vergangen.length ? `<details class="aufklapp"><summary>Vergangen (${vergangen.length})</summary>${vergangen.map(karte).join('')}</details>` : ''}`;
+}
+
+return { termineSeite };
+};
+__f['ui/druck.js'] = function () {
+// Druckansichten (A4): Monat, Betreuungsjahr, Verlauf. Gedruckt wird über den Druckdialog des Browsers.
+
+const Z = __r('engine/zeit.js');
+const { bilanz } = __r('engine/engine.js');
+const { kennzahlen, monatsuebersicht } = __r('engine/statistik.js');
+const {
+  NAME, esc, wt, datumDE, monatsname, datumUhrDE,
+} = __r('ui/util.js');
+const { monatGitter, monatHinweise, legendeHtml, jahrMonate } = __r('ui/kalender.js');
+const { bilanzTabelle, monatsTabelle } = __r('ui/statistik-ansicht.js');
+const { verlaufText } = __r('ui/listen.js');
+
+const leiste = (zurueck) => `<div class="druckleiste noprint"><a class="knopf" href="${zurueck}">‹ Zurück</a><button class="knopf primaer" data-act="drucken">Drucken / Als PDF speichern</button></div>`;
+
+function uebergabenTabelle(d, von, bis) {
+  const liste = d.plan.uebergaben.filter((u) => Z.parse(u.zeit) >= von && Z.parse(u.zeit) < bis);
+  if (!liste.length) return '<p class="klein">Keine Übergaben.</p>';
+  return `<table class="druckliste"><thead><tr><th>Datum</th><th>Uhr</th><th>Von</th><th>An</th><th>Grund</th></tr></thead><tbody>${liste.map((u) => `<tr>
+    <td>${wt(u.zeit)} ${datumDE(u.zeit)}</td><td>${u.zeit.slice(11, 16)}</td><td>${NAME[u.von]}</td><td>${NAME[u.an]}</td><td>${esc(u.grund)}</td></tr>`).join('')}</tbody></table>`;
+}
+
+function druckMonat(d, jahr, monat) {
+  const von = Z.datum(jahr, monat, 1);
+  const bis = monat === 12 ? Z.datum(jahr + 1, 1, 1) : Z.datum(jahr, monat + 1, 1);
+  const a = Math.max(von, d.planVon);
+  const b = Math.min(bis, d.planBis);
+  const k = b > a ? kennzahlen(bilanz(d.iv, a, b)) : null;
+  return `${leiste(`#/kalender/${jahr}-${String(monat).padStart(2, '0')}`)}
+    <div class="druck"><h1>Betreuungsplan Lotte – ${monatsname(jahr, monat)}</h1>
+    ${monatGitter(d, jahr, monat, true)}
+    ${monatHinweise(d, jahr, monat)}
+    ${legendeHtml()}
+    <h2>Übergaben</h2>${uebergabenTabelle(d, von, bis)}
+    <h2>Bilanz ${monatsname(jahr, monat)}</h2>${k ? bilanzTabelle(k) : '<p class="klein">Vor Planbeginn.</p>'}
+    <p class="klein">Stand ${esc(datumUhrDE(Z.format(d.jetzt)))}</p></div>`;
+}
+
+function druckJahr(d, jahrNr) {
+  const j = d.jahre.find((x) => x.jahr === jahrNr) ?? d.jahre[0];
+  const von = Z.parse(j.von);
+  const bis = Z.parse(j.bis);
+  return `${leiste(`#/statistik/${j.jahr}`)}
+    <div class="druck"><h1>Betreuungsplan Lotte – Betreuungsjahr ${j.jahr}</h1>
+    <p>${datumDE(j.von)} bis ${datumDE(j.bis)}</p>
+    ${jahrMonate(d, j.jahr, true)}
+    ${legendeHtml()}
+    <h2>Bilanz</h2>${bilanzTabelle(kennzahlen(bilanz(d.iv, von, bis)))}
+    <h2>Monatsübersicht</h2>${monatsTabelle(monatsuebersicht(d.iv, von, bis))}
+    <h2 class="seitenumbruch">Übergaben</h2>${uebergabenTabelle(d, von, bis)}
+    <p class="klein">Stand ${esc(datumUhrDE(Z.format(d.jetzt)))}</p></div>`;
+}
+
+function druckVerlauf(d) {
+  const person = (k) => (k === 'system' ? 'System' : k === d.rollen.papa ? 'Papa' : k === d.rollen.mama ? 'Mama' : 'Unbekannt');
+  return `${leiste('#/verlauf')}
+    <div class="druck"><h1>Verlauf – Betreuungsplaner Lotte</h1>
+    <table class="druckliste"><thead><tr><th>Zeit</th><th>Person</th><th>Ereignis</th><th>Einzelheiten</th></tr></thead><tbody>${d.verlauf.map((v) => {
+    const t = verlaufText(d, v);
+    return `<tr><td>${esc(datumUhrDE(v.zeit))}</td><td>${person(v.kontoId)}</td><td>${esc(t.titel)}</td><td>${esc([t.detail, t.komm].filter(Boolean).join(' · '))}</td></tr>`;
+  }).join('')}</tbody></table>
+    <p class="klein">Stand ${esc(datumUhrDE(Z.format(d.jetzt)))}</p></div>`;
+}
+
+return { druckMonat, druckJahr, druckVerlauf };
+};
+__f['ui/formulare.js'] = function () {
+// Dialoge: Antrag stellen (zwei Bildschirme), ablehnen/Gegenvorschlag, Storno, Regeländerung, Ferientermine, Tagesdetails.
+
+const Z = __r('engine/zeit.js');
+const { ersterSchultag, anderer } = __r('engine/engine.js');
+const { ausgleichDifferenz, FERIENARTEN } = __r('app/dienst.js');
+const {
+  app, zeigeModal, schliesseModal, modalBox, modalFehler, felder, fange, meldung, ZEITEN,
+} = __r('ui/ctx.js');
+const {
+  NAME, ARTEN_TEXT, esc, datumDE, uhr, wtDatumUhr, datumUhrDE, wtLang, feiertage,
+} = __r('ui/util.js');
+const { tagInfo, ivAt } = __r('ui/daten.js');
+const { FERIEN_NAMEN } = __r('ui/kalender.js');
+const { PARAMETER, holePfad, patchAus } = __r('ui/parameter.js');
+const { antragKarte } = __r('ui/listen.js');
+
+// ---------------------------------------------------------------------------
+// Feldbausteine
+
+const zeitSelect = (feld, wert) => {
+  const liste = ZEITEN.includes(wert) ? ZEITEN : [...ZEITEN, wert].sort();
+  return `<select data-f="${feld}" aria-label="Uhrzeit">${liste.map((z) => `<option${z === wert ? ' selected' : ''}>${z}</option>`).join('')}</select>`;
+};
+const datumFeld = (feld, wert) => `<input type="date" data-f="${feld}" value="${esc(wert)}" aria-label="Datum">`;
+const elternSelect = (feld, wert) => `<select data-f="${feld}">${['papa', 'mama'].map((p) => `<option value="${p}"${p === wert ? ' selected' : ''}>${NAME[p]}</option>`).join('')}</select>`;
+const meldeZeile = '<div id="mfehler" class="fehler" role="alert" hidden></div>';
+const zuTag = (datum, n) => Z.formatDatum(Z.plusTage(Z.parse(datum), n));
+
+// ---------------------------------------------------------------------------
+// Antrag stellen
+
+let F = null;
+
+/**
+ * @param {object} p  { tag?: 'JJJJ-MM-TT', modus?: 'neu'|'aenderung'|'gegen', antrag?: Antrag, kommentar?: string }
+ */
+function antragFormular(p = {}) {
+  const d = app.d;
+  const modus = p.modus ?? 'neu';
+  const f = {
+    modus, art: 'ausnahme', schritt: 1, vorschau: null, bezugId: null, gegenId: null, kommentar: p.kommentar ?? '',
+    bei: d.ich.rolle === 'papa' ? 'mama' : 'papa', begruendung: '', ausgleichAn: false,
+    vd: '', vt: '15:00', bd: '', bt: '15:00', avd: '', avt: '15:00', abd: '', abt: '15:00',
+  };
+  if (p.tag) {
+    const i = tagInfo(d, Z.parse(p.tag));
+    f.vd = p.tag;
+    f.bd = zuTag(p.tag, 1);
+    f.bei = i.nacht ? anderer(i.nacht) : d.ich.rolle;
+  } else {
+    const heute = Z.formatDatum(Z.tag(Math.max(d.jetzt, d.planVon)));
+    f.vd = heute;
+    f.bd = zuTag(heute, 1);
+  }
+  if (p.antrag) {
+    const a = p.antrag;
+    Object.assign(f, {
+      vd: a.von.slice(0, 10), vt: uhr(a.von), bd: a.bis.slice(0, 10), bt: uhr(a.bis), bei: a.bei, begruendung: a.begruendung,
+    });
+    if (a.ausgleich) Object.assign(f, { ausgleichAn: true, avd: a.ausgleich.von.slice(0, 10), avt: uhr(a.ausgleich.von), abd: a.ausgleich.bis.slice(0, 10), abt: uhr(a.ausgleich.bis) });
+    if (modus === 'aenderung') { f.bezugId = a.id; f.art = a.art; }
+    if (modus === 'gegen') { f.gegenId = a.id; f.art = a.art === 'weihnachtsbesuch' ? 'weihnachtsbesuch' : 'ausnahme'; }
+  }
+  F = f;
+  zeichneFormular();
+}
+
+function eingabeAusForm() {
+  const f = F;
+  const art = f.modus === 'aenderung' ? 'aenderung'
+    : f.art === 'weihnachtsbesuch' ? 'weihnachtsbesuch'
+      : f.ausgleichAn ? 'ausnahme_mit_ausgleich' : 'ausnahme';
+  const e = { art, von: `${f.vd}T${f.vt}`, bis: `${f.bd}T${f.bt}`, bei: f.bei, begruendung: f.begruendung };
+  if (f.ausgleichAn && f.art !== 'weihnachtsbesuch') e.ausgleich = { von: `${f.avd}T${f.avt}`, bis: `${f.abd}T${f.abt}` };
+  if (art === 'aenderung') e.bezug = { ausnahme: f.bezugId };
+  return e;
+}
+
+function sync() {
+  if (!modalBox()) return;
+  const v = felder();
+  for (const k of Object.keys(v)) if (k in F) F[k] = v[k];
+}
+
+function diffText() {
+  if (!F.ausgleichAn || F.art === 'weihnachtsbesuch') return '';
+  try {
+    const e = eingabeAusForm();
+    return ausgleichDifferenz(e).text;
+  } catch {
+    return '';
+  }
+}
+
+function weihnachtsVorbelegung() {
+  const d = app.d;
+  const jahr = Z.jahr(Z.parse(F.vd || Z.formatDatum(d.jetzt)));
+  const iv = ivAt(d, Z.datum(jahr, 12, 25, '12:00'));
+  F.vd = `${jahr}-12-25`;
+  F.vt = '14:00';
+  F.bd = `${jahr}-12-27`;
+  F.bt = '10:00';
+  F.bei = iv ? anderer(iv.bei) : F.bei;
+  if (!F.begruendung) F.begruendung = 'Weihnachtsbesuch';
+}
+
+function zeichneFormular() {
+  const f = F;
+  const gegen = f.modus === 'gegen';
+  const aend = f.modus === 'aenderung';
+  const titel = gegen ? 'Gegenvorschlag' : aend ? 'Ausnahme ändern' : 'Abweichung beantragen';
+  if (f.schritt === 2) {
+    const v = f.vorschau;
+    const liste = (l, leer) => (l.length ? `<ul class="liste kompakt">${l.map((u) => `<li>${esc(wtDatumUhr(u.zeit))}: ${NAME[u.von]} → ${NAME[u.an]}${u.grund ? ` <span class="klein">(${esc(u.grund)})</span>` : ''}</li>`).join('')}</ul>` : `<p class="klein">${leer}</p>`);
+    const e = eingabeAusForm();
+    const andere = NAME[anderer(app.d.ich.rolle)];
+    zeigeModal(`<h2>${titel}: Vorschau</h2>${meldeZeile}
+      <p><b>${esc(wtDatumUhr(e.von))} – ${esc(wtDatumUhr(e.bis))}</b><br>Lotte bei ${NAME[e.bei]}${e.ausgleich ? `<br>Ausgleich: ${esc(wtDatumUhr(e.ausgleich.von))} – ${esc(wtDatumUhr(e.ausgleich.bis))} bei ${NAME[anderer(e.bei)]}<br><b>${esc(diffText())}</b>` : ''}</p>
+      <h3>Entfallende Übergaben</h3>${liste(v.entfallen, 'Keine')}
+      <h3>Neue Übergaben</h3>${liste(v.neu, 'Keine')}
+      ${v.nachtraeglich ? '<p class="hinweis warn">Der Zeitraum hat schon begonnen: Der Antrag wird als <b>nachträglich</b> markiert und verfällt nicht.</p>' : ''}
+      <p class="klein">${gegen ? 'Der Gegenvorschlag ersetzt den abgelehnten Antrag.' : 'Der Antrag wirkt erst, wenn'} ${gegen ? '' : `${andere} ihn bestätigt hat.`}</p>
+      <div class="aktionen"><button class="knopf" data-act="formZurueck">Zurück</button><button class="knopf primaer" data-act="formSenden">${gegen ? 'Gegenvorschlag senden' : 'Antrag senden'}</button></div>`);
+    return;
+  }
+  const wb = f.art === 'weihnachtsbesuch';
+  zeigeModal(`<h2>${titel}</h2>${meldeZeile}
+    ${aend ? '' : `<label>Art<select data-f="art" data-change="formArt">
+        <option value="ausnahme"${!wb ? ' selected' : ''}>Ausnahme</option>
+        <option value="weihnachtsbesuch"${wb ? ' selected' : ''}>Weihnachtsbesuch</option></select></label>`}
+    ${wb ? '<p class="hinweis">Vorgesehen bei Fahrtzeit unter 1 Stunde, längere Besuche nach Absprache. Beginn am 25. oder 26.12., Ende spätestens 31.12. 10:00.</p>' : ''}
+    <fieldset><legend>Zeitraum</legend>
+      <div class="zeile"><span>Von</span>${datumFeld('vd', f.vd)}${zeitSelect('vt', f.vt)}</div>
+      <div class="zeile"><span>Bis</span>${datumFeld('bd', f.bd)}${zeitSelect('bt', f.bt)}</div>
+      <p class="klein">Regelzeiten: 15:00, 10:00, 18:00, Schulbeginn 08:00. Uhrzeiten in 15-Minuten-Schritten.</p>
+    </fieldset>
+    <label>Lotte ist bei ${elternSelect('bei', f.bei)}</label>
+    <label>Begründung (Pflicht)<textarea data-f="begruendung" rows="2">${esc(f.begruendung)}</textarea></label>
+    ${wb ? '' : `<label class="check"><input type="checkbox" data-f="ausgleichAn" data-change="formAusgleich"${f.ausgleichAn ? ' checked' : ''}> Mit Ausgleich beim anderen Elternteil</label>`}
+    ${f.ausgleichAn && !wb ? `<fieldset><legend>Ausgleichszeitraum (Lotte bei ${NAME[anderer(f.bei)]})</legend>
+        <div class="zeile"><span>Von</span>${datumFeld('avd', f.avd)}${zeitSelect('avt', f.avt)}</div>
+        <div class="zeile"><span>Bis</span>${datumFeld('abd', f.abd)}${zeitSelect('abt', f.abt)}</div>
+        <p id="diff" class="diff">${esc(diffText())}</p></fieldset>` : ''}
+    ${gegen ? `<label>Kommentar zur Ablehnung (Pflicht)<textarea data-f="kommentar" rows="2">${esc(f.kommentar)}</textarea></label>` : ''}
+    <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button><button class="knopf primaer" data-act="formWeiter">Weiter zur Vorschau</button></div>`);
+}
+
+const formAktionen = {
+  formArt() {
+    sync();
+    if (F.art === 'weihnachtsbesuch') { F.ausgleichAn = false; weihnachtsVorbelegung(); }
+    zeichneFormular();
+  },
+  formAusgleich() {
+    sync();
+    if (F.ausgleichAn && !F.avd) {
+      F.avd = zuTag(F.vd || F.bd, 7);
+      F.abd = zuTag(F.bd || F.vd, 7);
+    }
+    zeichneFormular();
+  },
+  formFeld() {
+    sync();
+    const el = document.getElementById('diff');
+    if (el) el.textContent = diffText();
+  },
+  async formWeiter() {
+    sync();
+    if (F.modus === 'gegen' && !F.kommentar.trim()) return modalFehler('Eine Ablehnung braucht einen Kommentar');
+    await fange(async () => {
+      const e = eingabeAusForm();
+      const v = await app.dienst.vorschau(e, { ausser: F.gegenId });
+      const beginn = Math.min(Z.parse(e.von), e.ausgleich ? Z.parse(e.ausgleich.von) : Infinity);
+      F.vorschau = { ...v, nachtraeglich: beginn <= app.d.jetzt };
+      F.schritt = 2;
+      zeichneFormular();
+    }, { imModal: true });
+  },
+  formZurueck() {
+    F.schritt = 1;
+    zeichneFormular();
+  },
+  async formSenden() {
+    const ok = await fange(async () => {
+      const e = eingabeAusForm();
+      if (F.modus === 'gegen') await app.dienst.ablehnen(F.gegenId, F.kommentar, e);
+      else await app.dienst.antragStellen(e);
+    }, { imModal: true });
+    if (!ok) return;
+    const gegen = F.modus === 'gegen';
+    schliesseModal();
+    await app.neuLaden();
+    meldung(gegen ? 'Gegenvorschlag gesendet' : 'Antrag gestellt. Er wirkt nach der Bestätigung.', 'ok');
+    location.hash = '#/antraege';
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Ablehnen, Storno
+
+function ablehnenDialog(id) {
+  const a = app.d.antraege.find((x) => x.id === id);
+  zeigeModal(`<h2>Antrag ablehnen</h2>${meldeZeile}
+    <p class="klein">${esc(ARTEN_TEXT[a.art])}</p>
+    <label>Kommentar (Pflicht)<textarea data-f="kommentar" rows="3"></textarea></label>
+    <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button>
+    ${a.art === 'regelaenderung' ? '' : `<button class="knopf" data-act="gegenvorschlagStart" data-id="${id}">Gegenvorschlag …</button>`}
+    <button class="knopf primaer" data-act="ablehnenSenden" data-id="${id}">Ablehnen</button></div>`);
+}
+
+const ablehnenAktionen = {
+  async ablehnenSenden(el) {
+    const { kommentar } = felder();
+    const ok = await fange(() => app.dienst.ablehnen(el.dataset.id, kommentar), { imModal: true });
+    if (!ok) return;
+    schliesseModal();
+    await app.neuLaden();
+    meldung('Antrag abgelehnt', 'ok');
+  },
+  gegenvorschlagStart(el) {
+    const { kommentar } = felder();
+    if (!kommentar.trim()) return modalFehler('Eine Ablehnung braucht einen Kommentar');
+    antragFormular({ modus: 'gegen', antrag: app.d.antraege.find((x) => x.id === el.dataset.id), kommentar });
+  },
+};
+
+function stornoDialog(id) {
+  const a = app.d.antraege.find((x) => x.id === id);
+  zeigeModal(`<h2>Ausnahme stornieren</h2>${meldeZeile}
+    <p>${esc(wtDatumUhr(a.von))} – ${esc(wtDatumUhr(a.bis))} bei ${NAME[a.bei]}</p>
+    <p class="klein">Das Storno wirkt erst, wenn ${NAME[anderer(app.d.ich.rolle)]} es bestätigt hat.</p>
+    <label>Begründung<textarea data-f="begruendung" rows="2"></textarea></label>
+    <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button><button class="knopf primaer" data-act="stornoSenden" data-id="${id}">Storno beantragen</button></div>`);
+}
+
+async function stornoSenden(el) {
+  const { begruendung } = felder();
+  const ok = await fange(() => app.dienst.antragStellen({ art: 'storno', bezug: { ausnahme: el.dataset.id }, begruendung }), { imModal: true });
+  if (!ok) return;
+  schliesseModal();
+  await app.neuLaden();
+  meldung('Storno beantragt', 'ok');
+}
+
+// ---------------------------------------------------------------------------
+// Regeländerung
+
+function paramEingabe(p, wert) {
+  if (p.typ === 'zeit') return zeitSelect('wert', wert ?? '08:00');
+  if (p.typ === 'eltern') return elternSelect('wert', wert ?? 'papa');
+  if (p.typ === 'zahl') return `<input type="number" data-f="wert" min="0" max="31" step="1" value="${esc(wert ?? '')}">`;
+  const [d, t] = String(wert ?? '2027-01-08T15:00').split('T');
+  return `${datumFeld('wd', d)}${zeitSelect('wt', t)}`;
+}
+
+function regelFelder(id) {
+  const p = PARAMETER.find((x) => x.id === id);
+  const jetzt = Z.format(app.d.jetzt);
+  const r = app.d.regeln.filter((v) => v.gueltigAb <= jetzt).at(-1) ?? app.d.regeln[0];
+  return `<label>Neuer Wert${p.typ === 'datumzeit' ? '' : ''}<div class="zeile">${paramEingabe(p, holePfad(r, p.pfad))}</div></label>`;
+}
+
+function regelDialog() {
+  const morgen = zuTag(Z.formatDatum(app.d.jetzt), 1);
+  zeigeModal(`<h2>Regeländerung beantragen</h2>${meldeZeile}
+    <label>Parameter<select data-f="param" data-change="regelParam">${PARAMETER.map((p) => `<option value="${p.id}">${esc(p.label)}</option>`).join('')}</select></label>
+    <div id="regelwert">${regelFelder(PARAMETER[0].id)}</div>
+    <fieldset><legend>Gilt ab Stichtag</legend><div class="zeile">${datumFeld('sd', morgen)}${zeitSelect('st', '00:00')}</div>
+    <p class="klein">Der Stichtag muss in der Zukunft liegen. Die Vergangenheit bleibt unverändert. Bestätigte Ausnahmen danach bleiben gültig, werden aber markiert.</p></fieldset>
+    <label>Begründung<textarea data-f="begruendung" rows="2"></textarea></label>
+    <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button><button class="knopf primaer" data-act="regelSenden">Beantragen</button></div>`);
+}
+
+const regelAktionen = {
+  regelParam() {
+    const { param } = felder();
+    document.getElementById('regelwert').innerHTML = regelFelder(param);
+  },
+  async regelSenden() {
+    const v = felder();
+    const p = PARAMETER.find((x) => x.id === v.param);
+    let wert = p.typ === 'datumzeit' ? `${v.wd}T${v.wt}` : v.wert;
+    if (p.typ === 'zahl') wert = Number(wert);
+    const ok = await fange(() => app.dienst.antragStellen({
+      art: 'regelaenderung', parameter: patchAus(p.pfad, wert), gueltigAb: `${v.sd}T${v.st}`, begruendung: v.begruendung,
+    }), { imModal: true });
+    if (!ok) return;
+    schliesseModal();
+    await app.neuLaden();
+    meldung('Regeländerung beantragt', 'ok');
+    location.hash = '#/antraege';
+  },
+};
+
+// ---------------------------------------------------------------------------
+// Ferientermine (nur Papa)
+
+function ferienDialog(id) {
+  const f = id ? app.d.ferien.find((x) => x.id === id) : null;
+  const berechnet = f ? Z.formatDatum(ersterSchultag(f.letzter)) : '';
+  zeigeModal(`<h2>${f ? 'Ferientermin ändern' : 'Ferientermin anlegen'}</h2>${meldeZeile}
+    <label>Schuljahr (z. B. 2030/31)<input data-f="schuljahr" value="${esc(f?.schuljahr ?? '')}" ${f ? 'readonly' : ''} pattern="\\d{4}/\\d{2}"></label>
+    <label>Ferienart<select data-f="art" ${f ? 'disabled' : ''}>${FERIENARTEN.map((a) => `<option value="${a}"${f?.art === a ? ' selected' : ''}>${FERIEN_NAMEN[a]}</option>`).join('')}</select></label>
+    <label>Erster Ferientag${datumFeld('erster', f?.erster ?? '')}</label>
+    <label>Letzter Ferientag${datumFeld('letzter', f?.letzter ?? '')}</label>
+    <label>Schulbeginn überschreiben (nur bei Abweichung)${datumFeld('schulbeginn', f?.schulbeginn ?? '')}</label>
+    <p class="klein">${berechnet ? `Berechneter Schulbeginn: ${datumDE(berechnet)}. ` : ''}Leer lassen, dann gilt der nächste Unterrichtstag nach dem letzten Ferientag. Prüfung: Ende nach Beginn, Schulbeginn höchstens 7 Tage nach Ferienende und an einem Werktag, keine Überschneidungen.</p>
+    <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button><button class="knopf primaer" data-act="ferienSenden" data-id="${esc(id ?? '')}">Speichern</button></div>`);
+}
+
+async function ferienSenden(el) {
+  const box = modalBox();
+  const v = felder();
+  const bestehend = el.dataset.id ? app.d.ferien.find((x) => x.id === el.dataset.id) : null;
+  const art = bestehend ? bestehend.art : box.querySelector('[data-f="art"]').value;
+  const ok = await fange(() => app.dienst.ferienSpeichern({
+    schuljahr: v.schuljahr.trim(), art, erster: v.erster, letzter: v.letzter, schulbeginn: v.schulbeginn || null,
+  }), { imModal: true });
+  if (!ok) return;
+  schliesseModal();
+  await app.neuLaden();
+  meldung('Ferientermin gespeichert (im Verlauf vermerkt)', 'ok');
+}
+
+// ---------------------------------------------------------------------------
+// Tagesdetails
+
+function tagDialog(datum) {
+  const d = app.d;
+  const i = tagInfo(d, Z.parse(datum));
+  const zeilen = [];
+  if (i.vorPlan) zeilen.push('<li>Vor Planbeginn – nicht berechnet.</li>');
+  else {
+    zeilen.push(`<li><b>Übernachtung:</b> ${i.nacht ? `<span class="wer ${i.nacht}">${NAME[i.nacht]}</span>` : '–'} <span class="klein">(${esc(i.grund ?? '')})</span></li>`);
+    for (const w of i.wechsel) zeilen.push(`<li><b>${uhr(w.zeit)} Uhr:</b> ${NAME[w.von]} → ${NAME[w.an]} <span class="klein">(${esc(w.grund)})</span></li>`);
+    if (!i.wechsel.length) zeilen.push('<li>Kein Wechsel an diesem Tag.</li>');
+  }
+  if (i.ferien) zeilen.push(`<li><b>Ferien:</b> ${FERIEN_NAMEN[i.ferien]} (F)</li>`);
+  if (i.feiertag) zeilen.push(`<li><b>Feiertag:</b> ${esc(i.feiertag)} (ändert keine Zuordnung)</li>`);
+  if (i.vorlaeufig) zeilen.push('<li class="warn"><b>vorläufig – Ferientermine fehlen:</b> nur Grundrhythmus.</li>');
+  for (const t of i.termine) zeilen.push(`<li><b>Termin:</b> ${esc(t.titel)}${t.ganztaegig ? ' (ganztägig)' : `, ${uhr(t.von)}–${uhr(t.bis)} Uhr`}${t.ort ? ` · ${esc(t.ort)}` : ''}</li>`);
+  const offene = i.offen.map((id) => d.antraege.find((a) => a.id === id)).filter(Boolean);
+  zeigeModal(`<h2>${esc(wtLang(datum))}, ${datumDE(datum)}</h2>
+    <ul class="zeilen">${zeilen.join('')}</ul>
+    ${offene.length ? `<h3>Offene Anträge</h3>${offene.map((a) => antragKarte(d, a, d.antraege)).join('')}` : ''}
+    <div class="aktionen"><button class="knopf" data-act="modalZu">Schließen</button>
+    <button class="knopf" data-act="tagTermin" data-tag="${datum}">Termin Lotte</button>
+    <button class="knopf primaer" data-act="tagAntrag" data-tag="${datum}">Abweichung beantragen</button></div>`);
+}
+
+function tagAntrag(el) {
+  antragFormular({ tag: el.dataset.tag });
+}
+
+
+// ---------------------------------------------------------------------------
+// Termine von Lotte
+
+let T = null;
+
+function terminForm() {
+  const t = T;
+  const zeit = (feld, wert) => (t.ganztaegig ? '' : zeitSelect(feld, wert));
+  zeigeModal(`<h2>${t.id ? 'Termin ändern' : 'Termin für Lotte'}</h2>${meldeZeile}
+    <label>Titel<input data-f="titel" value="${esc(t.titel)}" autocomplete="off"></label>
+    <label class="check"><input type="checkbox" data-f="ganztaegig" data-change="terminGanz"${t.ganztaegig ? ' checked' : ''}> Ganztägig</label>
+    <fieldset><legend>Zeit</legend>
+      <div class="zeile"><span>Von</span>${datumFeld('vd', t.vd)}${zeit('vt', t.vt)}</div>
+      <div class="zeile"><span>Bis</span>${datumFeld('bd', t.bd)}${zeit('bt', t.bt)}</div>
+    </fieldset>
+    <label>Ort (wird als Google-Maps-Link in den Kalender übernommen)<input data-f="ort" value="${esc(t.ort)}" autocomplete="off" placeholder="Straße, Ort"></label>
+    <label>Notiz<textarea data-f="notiz" rows="2">${esc(t.notiz)}</textarea></label>
+    <p class="klein">Termine brauchen keine Bestätigung und ändern die Betreuung nicht. Änderungen stehen im Verlauf.</p>
+    <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button><button class="knopf primaer" data-act="terminSenden">Speichern</button></div>`);
+}
+
+function terminDialog({ id = null, tag = null } = {}) {
+  const alt = id ? app.d.termine.find((x) => x.id === id) : null;
+  const heute = Z.formatDatum(Z.tag(Math.max(app.d.jetzt, app.d.planVon)));
+  T = alt
+    ? { id, titel: alt.titel, ganztaegig: alt.ganztaegig, vd: alt.von.slice(0, 10), vt: uhr(alt.von), bd: alt.bis.slice(0, 10), bt: uhr(alt.bis), ort: alt.ort, notiz: alt.notiz }
+    : { id: null, titel: '', ganztaegig: false, vd: tag ?? heute, vt: '15:00', bd: tag ?? heute, bt: '16:00', ort: '', notiz: '' };
+  terminForm();
+}
+
+const terminAktionen = {
+  terminGanz() {
+    Object.assign(T, felder());
+    terminForm();
+  },
+  async terminSenden() {
+    const v = felder();
+    const ok = await fange(() => app.dienst.terminSpeichern({
+      id: T.id, titel: v.titel, ganztaegig: v.ganztaegig,
+      von: `${v.vd}T${v.vt ?? '00:00'}`, bis: `${v.bd}T${v.bt ?? '00:00'}`, ort: v.ort, notiz: v.notiz,
+    }), { imModal: true });
+    if (!ok) return;
+    schliesseModal();
+    await app.neuLaden();
+    meldung('Termin gespeichert', 'ok');
+  },
+};
+
+function terminAbsagenDialog(id) {
+  const t = app.d.termine.find((x) => x.id === id);
+  zeigeModal(`<h2>Termin absagen?</h2><p><b>${esc(t.titel)}</b><br>${esc(wtDatumUhr(t.von))}</p>
+    <p class="klein">Der Termin bleibt sichtbar und wird als abgesagt markiert (im Kalenderexport als abgesagt). Gelöscht wird nichts.</p>
+    <div class="aktionen"><button class="knopf" data-act="modalZu">Behalten</button><button class="knopf primaer" data-act="terminAbsagenJa" data-id="${esc(id)}">Absagen</button></div>`);
+}
+
+async function terminAbsagenJa(el) {
+  const ok = await fange(() => app.dienst.terminAbsagen(el.dataset.id), { imModal: true });
+  if (!ok) return;
+  schliesseModal();
+  await app.neuLaden();
+  meldung('Termin abgesagt', 'ok');
+}
+
+return { antragFormular, formAktionen, ablehnenDialog, ablehnenAktionen, stornoDialog, stornoSenden, regelDialog, regelAktionen, ferienDialog, ferienSenden, tagDialog, tagAntrag, terminDialog, terminAktionen, terminAbsagenDialog, terminAbsagenJa };
+};
+__f['ui/app.js'] = function () {
+// Einstieg: Start, Router, Navigation, Aktionen, Export/Import.
+
+const Z = __r('engine/zeit.js');
+const { erstelleDienst, MELDUNG } = __r('app/dienst.js');
+const { erstelleLocalStorageSpeicher } = __r('speicher/localstorage.js');
+const { DEV_KONTEN } = __r('speicher/inmemory.js');
+const { erstelleFirebaseSpeicher } = __r('speicher/firebase.js');
+const { FIREBASE_CONFIG, PAPA_EMAIL } = __r('data/firebase-config.js');
+const { app, meldung, zeigeModal, schliesseModal, fange, modalFehler } = __r('ui/ctx.js');
+const { ladeDaten, betreuungsjahrZu } = __r('ui/daten.js');
+const { esc, NAME, download, datumDE } = __r('ui/util.js');
+const { startSeite } = __r('ui/start.js');
+const { kalenderSeite, jahrSeite } = __r('ui/kalender.js');
+const {
+  uebergabenSeite, antraegeSeite, verlaufSeite, ferienSeite, regelnSeite, verlaufCsv,
+} = __r('ui/listen.js');
+const { statistikSeite } = __r('ui/statistik-ansicht.js');
+const { termineSeite } = __r('ui/termine.js');
+const { betreuungsBloecke, betreuungsIcs, termineIcs } = __r('app/ics.js');
+const { druckMonat, druckJahr, druckVerlauf } = __r('ui/druck.js');
+const {
+  antragFormular, formAktionen, ablehnenDialog, ablehnenAktionen, stornoDialog, stornoSenden,
+  regelDialog, regelAktionen, ferienDialog, ferienSenden, tagDialog, tagAntrag,
+  terminDialog, terminAktionen, terminAbsagenDialog, terminAbsagenJa,
+} = __r('ui/formulare.js');
+
+const ROLLE_KEY = 'betreuungsplaner:dev-rolle';
+const THEME_KEY = 'betreuungsplaner:theme';
+const lies = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const schreibe = (k, v) => { try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch { /* ohne Speicher weiter */ } };
+
+// ---------------------------------------------------------------------------
+// Start
+
+function jetztFn() {
+  const p = new URLSearchParams(location.search).get('jetzt'); // nur Entwicklung: ?jetzt=2027-06-01T12:00
+  if (p) {
+    try { return Z.parse(p); } catch { /* ignorieren */ }
+  }
+  return Z.ausDate(new Date());
+}
+
+async function neuLaden() {
+  try {
+    app.d = await ladeDaten(app.dienst, jetztFn());
+    app.fehler = null;
+  } catch (e) {
+    app.d = null;
+    app.fehler = e.message || String(e);
+    app.nutzer = await app.speicher.aktuellerNutzer().catch(() => null);
+  }
+  zeichne();
+}
+
+async function start() {
+  const theme = lies(THEME_KEY);
+  if (theme) document.documentElement.dataset.theme = theme;
+  // Lokal (localhost, file://, ?dev) arbeitet die App mit Browser-Speicher und Rollenumschalter; sonst mit Firebase.
+  const lokal = !FIREBASE_CONFIG.projectId || new URLSearchParams(location.search).has('dev')
+    || ['', 'localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+  app.dev = !window.__BETREUUNG_ADAPTER__ && lokal;
+  app.speicher = window.__BETREUUNG_ADAPTER__
+    ?? (lokal ? erstelleLocalStorageSpeicher() : await erstelleFirebaseSpeicher({ config: FIREBASE_CONFIG, papaEmail: PAPA_EMAIL }));
+  await app.speicher.bereit?.();
+  app.dienst = erstelleDienst({ speicher: app.speicher, jetzt: jetztFn });
+  app.neuLaden = neuLaden;
+  app.zeichne = zeichne;
+
+  if (app.dev) {
+    const setzeRolle = () => app.speicher.nutzerSetzen(lies(ROLLE_KEY) === 'mama' ? DEV_KONTEN.mama : DEV_KONTEN.papa);
+    setzeRolle();
+    if (!(await app.speicher.lesen('config', 'rollen'))) {
+      app.speicher.nutzerSetzen(DEV_KONTEN.papa);
+      await app.dienst.einrichten();
+      setzeRolle();
+    }
+  }
+  window.addEventListener('hashchange', zeichne);
+  document.addEventListener('click', klick);
+  document.addEventListener('change', aenderung);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') schliesseModal(); });
+  await neuLaden();
+}
+
+// ---------------------------------------------------------------------------
+// Router
+
+function route() {
+  const teile = location.hash.replace(/^#\/?/, '').split('/').filter(Boolean);
+  return { seite: teile[0] ?? 'start', a: teile[1], b: teile[2] };
+}
+
+function standardJahr(d) {
+  return betreuungsjahrZu(d, Math.max(d.jetzt, d.planVon))?.jahr ?? d.jahre[0]?.jahr;
+}
+
+const TABS = [
+  ['start', 'Start', '⌂', ['start']],
+  ['kalender', 'Kalender', '▦', ['kalender', 'jahr']],
+  ['antraege', 'Anträge', '✎', ['antraege']],
+  ['statistik', 'Statistik', '▤', ['statistik']],
+  ['mehr', 'Mehr', '☰', ['mehr', 'uebergaben', 'termine', 'regeln', 'ferien', 'verlauf', 'export']],
+];
+
+function zeichne() {
+  const root = document.getElementById('app');
+  if (app.fehler) {
+    root.innerHTML = fehlerSeite();
+    return;
+  }
+  const d = app.d;
+  const r = route();
+  const st = app.state;
+  const monatAusRoute = () => {
+    const m = /^(\d{4})-(\d{2})$/.exec(r.a ?? '');
+    if (m) return { jahr: +m[1], monat: +m[2] };
+    const ref = Math.max(d.jetzt, d.planVon);
+    return { jahr: Z.jahr(ref), monat: Z.monat(ref) };
+  };
+  const jahrAusRoute = (x) => (/^\d{4}$/.test(x ?? '') ? +x : standardJahr(d));
+
+  let inhalt;
+  let druck = false;
+  switch (r.seite) {
+    case 'kalender': st.monat = monatAusRoute(); inhalt = kalenderSeite(d, st); break;
+    case 'jahr': st.jahr = jahrAusRoute(r.a); inhalt = jahrSeite(d, st); break;
+    case 'antraege': inhalt = antraegeSeite(d, st); break;
+    case 'statistik': st.jahr = jahrAusRoute(r.a); inhalt = statistikSeite(d, st); break;
+    case 'uebergaben': st.jahr = jahrAusRoute(r.a); inhalt = uebergabenSeite(d, st); break;
+    case 'termine': inhalt = termineSeite(d); break;
+    case 'regeln': inhalt = regelnSeite(d); break;
+    case 'ferien': inhalt = ferienSeite(d); break;
+    case 'verlauf': inhalt = verlaufSeite(d); break;
+    case 'export': inhalt = exportSeite(d); break;
+    case 'mehr': inhalt = mehrSeite(d); break;
+    case 'druck': {
+      druck = true;
+      if (r.a === 'monat') { const m = /^(\d{4})-(\d{2})$/.exec(r.b ?? ''); inhalt = m ? druckMonat(d, +m[1], +m[2]) : '<p>Ungültiger Monat</p>'; }
+      else if (r.a === 'jahr') inhalt = druckJahr(d, jahrAusRoute(r.b));
+      else inhalt = druckVerlauf(d);
+      break;
+    }
+    default: inhalt = startSeite(d);
+  }
+
+  const aktiv = TABS.find((t) => t[3].includes(r.seite))?.[0] ?? 'start';
+  const mirOffen = d.offen.filter((a) => a.antragsteller !== d.ich.kontoId).length;
+  const rolle = d.ich.rolle;
+  const kopf = `<header class="kopf"><h1>Betreuungsplaner Lotte</h1><div class="rolle">
+      ${app.dev ? `<span class="rollenschalter" role="group" aria-label="Rolle (Entwicklungsmodus)">${['papa', 'mama'].map((p) => `<button data-act="rolle" data-rolle="${p}" aria-pressed="${p === rolle}">${NAME[p]}</button>`).join('')}</span>` : `<span class="wer ${rolle}">${NAME[rolle]}</span>`}
+    </div></header>`;
+  const tabs = `<nav class="tabs" aria-label="Hauptnavigation">${TABS.map(([id, text, sym]) => `<a href="#/${id}"${id === aktiv ? ' aria-current="page"' : ''}><span class="sym" aria-hidden="true">${sym}</span>${text}${id === 'antraege' && mirOffen ? `<span class="zaehler" aria-label="${mirOffen} zur Entscheidung">${mirOffen}</span>` : ''}</a>`).join('')}</nav>`;
+  root.innerHTML = `${kopf}<main${druck ? ' class="druckseite"' : ''}>${inhalt}</main>${tabs}`;
+  if (r.seite !== 'start' || !st.beibehalteScroll) window.scrollTo(0, 0);
+}
+
+function fehlerSeite() {
+  const einrichten = app.fehler === MELDUNG.NICHT_EINGERICHTET && app.nutzer?.istBesitzer;
+  return `<main><div class="karte"><h2>Betreuungsplaner</h2><p class="gross">${esc(app.fehler)}</p>
+    ${einrichten ? `<p>Du bist als Besitzer angemeldet. Mama wird automatisch verbunden, sobald sie den Plan zum ersten Mal öffnet.</p>
+      <div class="aktionen"><button class="knopf primaer" data-act="einrichten">Plan einrichten</button></div>` : ''}
+    ${app.fehler === MELDUNG.NICHT_ANGEMELDET && app.speicher.anmelden ? '<div class="aktionen"><button class="knopf primaer" data-act="anmelden">Mit Google anmelden</button></div>' : ''}
+    ${app.fehler === MELDUNG.KEINE_BERECHTIGUNG && app.speicher.abmelden ? `<p class="klein">Angemeldet als ${esc(app.speicher.email?.() ?? '')}.</p><div class="aktionen"><button class="knopf" data-act="abmelden">Anderes Konto verwenden</button></div>` : ''}
+    <p class="klein">Ohne Anmeldung oder ohne Datenbankzugriff kann der Plan nicht angezeigt werden.</p></div></main>`;
+}
+
+function mehrSeite(d) {
+  const theme = document.documentElement.dataset.theme ?? '';
+  return `<h2>Mehr</h2>
+    <ul class="menue">
+      <li><a href="#/termine">Termine Lotte <span aria-hidden="true">›</span></a></li>
+      <li><a href="#/uebergaben">Übergaben <span aria-hidden="true">›</span></a></li>
+      <li><a href="#/regeln">Regeln <span aria-hidden="true">›</span></a></li>
+      <li><a href="#/ferien">Ferientermine <span aria-hidden="true">›</span></a></li>
+      <li><a href="#/verlauf">Verlauf <span aria-hidden="true">›</span></a></li>
+      <li><a href="#/export">Export und Sicherung <span aria-hidden="true">›</span></a></li>
+      <li><a href="#/jahr">Jahresübersicht <span aria-hidden="true">›</span></a></li>
+    </ul>
+    <h3>Darstellung</h3>
+    <div class="chips">${[['', 'Automatisch'], ['light', 'Hell'], ['dark', 'Dunkel']].map(([v, t]) => `<button class="chip${theme === v ? ' aktiv' : ''}" data-act="theme" data-theme="${v}">${t}</button>`).join('')}</div>
+    ${app.speicher.abmelden ? `<h3>Konto</h3><p class="klein">Angemeldet als ${esc(app.speicher.email?.() ?? '')} (${d.ich.rolle === 'papa' ? 'Papa' : 'Mama'}).</p>
+      <div class="aktionen"><button class="knopf" data-act="abmelden">Abmelden</button></div>` : ''}
+    ${app.dev ? `<h3>Entwicklungsmodus</h3>
+      <p class="klein">Lokale Daten im Browser (localStorage). Die Rolle schaltest du oben um; im Betrieb kommt sie vom Konto. Mit <code>?jetzt=2027-06-01T12:00</code> in der Adresse lässt sich die Uhr setzen. Jetzt: ${esc(datumDE(Z.format(d.jetzt)))} ${Z.format(d.jetzt).slice(11)}</p>
+      <div class="aktionen"><button class="knopf" data-act="zuruecksetzen">Lokale Daten zurücksetzen</button></div>` : ''}`;
+}
+
+function exportSeite(d) {
+  const papa = d.ich.rolle === 'papa';
+  return `<h2>Export und Sicherung</h2>
+    <div class="karte"><h3>Google Kalender / Kalenderdatei (.ics)</h3>
+      <p class="klein">Die Datei in Google Kalender importieren (Einstellungen › Importieren, Ziel: euer Familienkalender) oder auf dem Handy öffnen und „Kalender hinzufügen“ wählen. Betreuungsblöcke tragen die Übergabezeiten, Termine mit Ort einen Karten-Link. Kein Live-Abgleich: Nach Änderungen die Datei neu importieren. Jeder Eintrag hat eine feste Kennung, Google erkennt ihn dann in der Regel wieder und aktualisiert ihn statt ihn doppelt anzulegen (bitte einmal mit einem Probetermin prüfen). Exportiert wird nur Bestätigtes.</p>
+      <div class="aktionen"><button class="knopf" data-act="exportBetreuungIcs" data-bereich="heute">Betreuung ab heute</button>
+      <button class="knopf" data-act="exportBetreuungIcs" data-bereich="alles">Betreuung ganzer Plan</button>
+      <button class="knopf" data-act="exportTermineIcs">Termine Lotte</button></div>
+      <p class="klein">Betreuung wird bis zum letzten bekannten Schulbeginn (${d.vorlaeufigAb === null ? '–' : datumDE(Z.format(d.vorlaeufigAb))}) exportiert; vorläufige Zeiträume ohne Ferientermine bleiben draußen.</p></div>
+    <div class="karte"><h3>Verlauf</h3><p class="klein">Alle Ereignisse mit Zeitstempel und Person.</p>
+      <div class="aktionen"><button class="knopf" data-act="exportCsv">Als CSV</button><a class="knopf" href="#/druck/verlauf">Druckbare Liste</a></div></div>
+    <div class="karte"><h3>Datensicherung</h3><p class="klein">Regeln, Ferientermine, Anträge und Verlauf als JSON-Datei.</p>
+      <div class="aktionen"><button class="knopf" data-act="exportJson">Sicherung herunterladen</button>
+      ${papa ? '<button class="knopf" data-act="importWahl">Sicherung einspielen …</button>' : ''}</div>
+      ${papa ? '' : '<p class="klein">Nur Papa kann eine Sicherung wieder einspielen.</p>'}
+      <input type="file" id="datei" accept="application/json,.json" data-change="importDatei" hidden></div>
+    <div class="karte"><h3>Druckansichten</h3><div class="aktionen">
+      <a class="knopf" href="#/druck/monat/${Z.formatDatum(Math.max(d.jetzt, d.planVon)).slice(0, 7)}">Aktueller Monat</a>
+      <a class="knopf" href="#/druck/jahr/${standardJahr(d)}">Betreuungsjahr ${standardJahr(d)}</a></div></div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Aktionen
+
+let importDaten = null;
+
+const aktionen = {
+  ...formAktionen,
+  ...ablehnenAktionen,
+  ...regelAktionen,
+  ...terminAktionen,
+  terminDialog: (el) => terminDialog({ id: el.dataset.id || null }),
+  terminAbsagenDialog: (el) => terminAbsagenDialog(el.dataset.id),
+  terminAbsagenJa,
+  tagTermin: (el) => { schliesseModal(); terminDialog({ tag: el.dataset.tag }); },
+  tag: (el) => tagDialog(el.dataset.tag),
+  tagAntrag,
+  neuerAntrag: () => antragFormular(),
+  filter(el) { app.state.antragFilter[el.dataset.gruppe] = el.dataset.wert; zeichne(); },
+  filterOffen() { app.state.antragFilter = { status: 'offen', person: 'alle' }; },
+  async bestaetigen(el) {
+    if (await fange(() => app.dienst.bestaetigen(el.dataset.id))) { schliesseModal(); await neuLaden(); meldung('Antrag bestätigt', 'ok'); } else await neuLaden();
+  },
+  async zurueckziehen(el) {
+    if (await fange(() => app.dienst.zurueckziehen(el.dataset.id))) { await neuLaden(); meldung('Antrag zurückgezogen', 'ok'); } else await neuLaden();
+  },
+  ablehnenDialog: (el) => ablehnenDialog(el.dataset.id),
+  aenderungDialog: (el) => { schliesseModal(); antragFormular({ modus: 'aenderung', antrag: app.d.antraege.find((a) => a.id === el.dataset.id) }); },
+  stornoDialog: (el) => stornoDialog(el.dataset.id),
+  stornoSenden,
+  regelDialog,
+  ferienDialog: (el) => ferienDialog(el.dataset.id || null),
+  ferienSenden,
+  modalZu: schliesseModal,
+  modalHintergrund(el, ev) { if (ev.target === el) schliesseModal(); },
+  drucken: () => window.print(),
+  async rolle(el) {
+    schreibe(ROLLE_KEY, el.dataset.rolle);
+    app.speicher.nutzerSetzen(DEV_KONTEN[el.dataset.rolle]);
+    await neuLaden();
+  },
+  theme(el) {
+    const v = el.dataset.theme;
+    if (v) document.documentElement.dataset.theme = v; else delete document.documentElement.dataset.theme;
+    schreibe(THEME_KEY, v || null);
+    zeichne();
+  },
+  zuruecksetzen() {
+    zeigeModal(`<h2>Lokale Daten zurücksetzen?</h2><p>Alle lokal gespeicherten Anträge, Regeländerungen, Ferientermine und der Verlauf werden gelöscht. Das gilt nur für diesen Browser (Entwicklungsmodus).</p>
+      <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button><button class="knopf primaer" data-act="zuruecksetzenJa">Ja, zurücksetzen</button></div>`);
+  },
+  zuruecksetzenJa() { app.speicher.zuruecksetzen(); location.hash = '#/start'; location.reload(); },
+  async anmelden() { await app.speicher.anmelden(); await neuLaden(); },
+  async abmelden() { await app.speicher.abmelden(); await neuLaden(); },
+  async einrichten() {
+    if (await fange(() => app.dienst.einrichten())) await neuLaden();
+  },
+  async exportCsv() {
+    const csv = verlaufCsv(app.d);
+    download(`verlauf-${Z.formatDatum(app.d.jetzt)}.csv`, csv, 'text/csv;charset=utf-8');
+  },
+  async exportJson() {
+    await fange(async () => {
+      const s = await app.dienst.sicherungExportieren();
+      download(`betreuungsplaner-sicherung-${Z.formatDatum(app.d.jetzt)}.json`, JSON.stringify(s, null, 2), 'application/json');
+    });
+  },
+  exportBetreuungIcs(el) {
+    const d = app.d;
+    const von = el.dataset.bereich === 'alles' ? d.planVon : Math.max(Z.tag(d.jetzt), d.planVon);
+    const bloecke = betreuungsBloecke(d.iv, { von, bis: d.vorlaeufigAb ?? von });
+    if (!bloecke.length) return meldung('Für diesen Bereich gibt es keine Betreuungsblöcke.', 'fehler');
+    const ics = betreuungsIcs(bloecke, { sequenz: Math.floor(Date.now() / 1000) });
+    download(`betreuung-lotte-${Z.formatDatum(d.jetzt)}.ics`, ics, 'text/calendar;charset=utf-8');
+    meldung(`${bloecke.length} Betreuungsblöcke exportiert`, 'ok');
+  },
+  exportTermineIcs() {
+    if (!app.d.termine.length) return meldung('Es gibt noch keine Termine.', 'fehler');
+    download(`termine-lotte-${Z.formatDatum(app.d.jetzt)}.ics`, termineIcs(app.d.termine), 'text/calendar;charset=utf-8');
+    meldung(`${app.d.termine.length} Termine exportiert`, 'ok');
+  },
+  importWahl: () => document.getElementById('datei').click(),
+  async importJa() {
+    const ok = await fange(() => app.dienst.sicherungEinspielen(importDaten), { imModal: true });
+    if (!ok) return;
+    importDaten = null;
+    schliesseModal();
+    await neuLaden();
+    meldung('Sicherung eingespielt', 'ok');
+  },
+  async importDatei(el) {
+    const datei = el.files[0];
+    el.value = '';
+    if (!datei) return;
+    try {
+      importDaten = JSON.parse(await datei.text());
+    } catch {
+      return meldung(MELDUNG.SICHERUNG_UNGUELTIG, 'fehler');
+    }
+    const n = (k) => (Array.isArray(importDaten?.[k]) ? importDaten[k].length : 0);
+    zeigeModal(`<h2>Sicherung einspielen?</h2><div id="mfehler" class="fehler" hidden></div>
+      <p>Datei: ${esc(datei.name)} (erzeugt ${esc(importDaten?.erzeugt ?? '?')})</p>
+      <p>${n('regeln')} Regelstände, ${n('ferien')} Ferientermine, ${n('antraege')} Anträge, ${n('verlauf')} Verlaufseinträge.</p>
+      <p class="hinweis warn">Regeln, Ferientermine und Anträge mit gleicher Kennung werden überschrieben. Fehlende Verlaufseinträge werden angehängt, vorhandene bleiben unverändert. Das lässt sich nicht rückgängig machen.</p>
+      <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button><button class="knopf primaer" data-act="importJa">Einspielen</button></div>`);
+  },
+};
+
+async function klick(ev) {
+  const el = ev.target.closest('[data-act]');
+  if (!el) return;
+  const f = aktionen[el.dataset.act];
+  if (!f) return;
+  try {
+    await f(el, ev);
+  } catch (e) {
+    modalFehler(e.message || String(e));
+  }
+}
+
+async function aenderung(ev) {
+  const el = ev.target;
+  const name = el.dataset?.change;
+  if (name && aktionen[name]) {
+    try { await aktionen[name](el, ev); } catch (e) { modalFehler(e.message); }
+    return;
+  }
+  if (el.closest('#modal') && el.dataset?.f && document.getElementById('diff')) formAktionen.formFeld();
+}
+
+start().catch((e) => {
+  document.getElementById('app').innerHTML = `<main><div class="karte"><h2>Fehler beim Start</h2><p>${esc(e.message || String(e))}</p></div></main>`;
+});
+
+return {  };
+};
+__r('ui/app.js');
+
+</script>
+</body>
+</html>
