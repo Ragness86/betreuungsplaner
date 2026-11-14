@@ -263,7 +263,7 @@ label > .zeile { grid-template-columns: 1fr 6.5rem; }
 <div id="toast" role="status" hidden></div>
 <script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});</script>
 <noscript>Der Betreuungsplaner braucht JavaScript.</noscript>
-<!-- Build 14.11.2026 10:27 -->
+<!-- Build 14.11.2026 13:35 -->
 <script>
 const __m = {}; const __f = {};
 function __r(id) { if (!(id in __m)) __m[id] = __f[id](); return __m[id]; }
@@ -2850,6 +2850,87 @@ function startSeite(d) {
 
 return { startSeite };
 };
+__f['app/ausgleich.js'] = function () {
+// Ausgleichsvorschlag: Wer eine Ausnahme bekommt (Lotte bei X statt bei Y), gibt Y die verlorene Zeit zurück.
+// Der Vorschlag wird aus dem Plan berechnet: gleich lang, nur in Zeit des Grundrhythmus, in der Lotte bei X wäre (nie in Ferien,
+// nie auf andere Ausnahmen/Ausgleiche), möglichst bald und möglichst mit vorhandenen Übergabezeitpunkten (Rhythmuswechsel).
+// Gleich lange Ausgleiche lassen die Jahresverteilung der Nächte unverändert. Reine Funktion, keine Speicherzugriffe.
+
+const Z = __r('engine/zeit.js');
+const { anderer } = __r('engine/engine.js');
+
+const TAG = Z.MINUTEN_PRO_TAG;
+/** So weit nach dem Ende der Ausnahme wird gesucht. */
+const SUCHTAGE = 120;
+
+const wochenende = (t) => { const w = Z.wochentag?.(t) ?? 0; return w === 5 || w === 6 || w === 0; };
+
+/**
+ * @param {object} e
+ * @param {object[]} e.intervalle  Planintervalle (Minutenwerte; bei, quelle, vorlaeufig), z. B. d.iv
+ * @param {{von:number,bis:number}[]} [e.gesperrt]  Zeiträume offener Anträge (Minuten)
+ * @param {number} e.jetzt
+ * @param {{von:string,bis:string,bei:string}} e.ausnahme  Eingabe des Antrags (Text wie im Formular)
+ * @returns {{ keiner: boolean, grund?: string, liste: object[] }}
+ *   liste: beste Vorschläge zuerst, je { von, bis, bei, stunden, abstandTage, neueUebergaben, ganzerBlock }
+ */
+function ausgleichVorschlaege({ intervalle, gesperrt = [], jetzt, ausnahme }) {
+  const vv = Z.parse(ausnahme.von);
+  const bb = Z.parse(ausnahme.bis);
+  const X = ausnahme.bei;
+  const Y = anderer(X);
+  if (!(bb > vv)) return { keiner: true, grund: 'Zeitraum der Ausnahme fehlt', liste: [] };
+
+  // Verlust: Zeit im Zeitraum der Ausnahme, in der Lotte laut Plan bei Y wäre
+  let verlust = 0;
+  for (const iv of intervalle) {
+    if (iv.bei !== Y) continue;
+    const a = Math.max(iv.von, vv);
+    const b = Math.min(iv.bis, bb);
+    if (b > a) verlust += b - a;
+  }
+  if (verlust <= 0) return { keiner: true, grund: 'Lotte ist in diesem Zeitraum ohnehin bei dem gewählten Elternteil', liste: [] };
+
+  // Freie Fenster: Zeit des Grundrhythmus bei X (zusammenhängend), nach der Ausnahme, nicht vorläufig, nicht gesperrt
+  const sperren = [...gesperrt, { von: vv, bis: bb }];
+  const frei = [];
+  for (const iv of intervalle) {
+    if (iv.bei !== X || iv.quelle !== 'rhythmus' || iv.vorlaeufig) continue;
+    const l = frei.at(-1);
+    if (l && l.bis === iv.von) l.bis = iv.bis;
+    else frei.push({ von: iv.von, bis: iv.bis });
+  }
+  const start = Math.max(bb, jetzt);
+  const ende = bb + SUCHTAGE * TAG;
+  const kandidaten = new Map();
+  const probiere = (a, b, ganz) => {
+    if (a < start || a > ende) return;
+    if (sperren.some((s) => a < s.bis && s.von < b)) return;
+    const k = `${a}`;
+    const abstand = (a - bb) / TAG;
+    // Kosten: Abstand in Tagen; eine neue Übergabe mehr kostet 7 Tage; anderer Wochentagstyp 5 Tage
+    const neue = ganz ? 0 : 1;
+    const kosten = abstand + neue * 7 + (wochenende(Z.tag(a)) === wochenende(Z.tag(vv)) ? 0 : 5);
+    const alt = kandidaten.get(k);
+    if (!alt || alt.kosten > kosten) kandidaten.set(k, { von: a, bis: b, kosten, neue, abstand, ganz });
+  };
+  for (const f of frei) {
+    if (f.bis - f.von < verlust) continue;
+    const ganz = f.bis - f.von === verlust;
+    probiere(f.von, f.von + verlust, ganz);               // Beginn mit der vorhandenen Übergabe
+    if (!ganz) probiere(f.bis - verlust, f.bis, false);   // Ende mit der vorhandenen Übergabe
+  }
+  const liste = [...kandidaten.values()].sort((a, b) => a.kosten - b.kosten || a.von - b.von).slice(0, 5).map((k) => ({
+    von: Z.format(k.von), bis: Z.format(k.bis), bei: Y, stunden: verlust / 60,
+    abstandTage: Math.round(k.abstand), neueUebergaben: k.neue, ganzerBlock: k.ganz,
+  }));
+  return liste.length
+    ? { keiner: false, liste }
+    : { keiner: true, grund: `Innerhalb von ${SUCHTAGE} Tagen ist kein freier Zeitraum in dieser Länge vorhanden`, liste: [] };
+}
+
+return { SUCHTAGE, ausgleichVorschlaege };
+};
 __f['ui/parameter.js'] = function () {
 // Beschreibung der Regelparameter für Regeländerungen und die Klartext-Ansicht.
 
@@ -2906,6 +2987,7 @@ __f['ui/listen.js'] = function () {
 const Z = __r('engine/zeit.js');
 const { ersterSchultag } = __r('engine/engine.js');
 const { ausgleichDifferenz, FERIENARTEN } = __r('app/dienst.js');
+const { ausgleichVorschlaege } = __r('app/ausgleich.js');
 const {
   NAME, ARTEN_TEXT, STATUS_TEXT, esc, wtDatumUhr, datumDE, datumUhrDE, wtLang, uhr, zahl,
 } = __r('ui/util.js');
@@ -2968,6 +3050,19 @@ function antragKarte(d, a, alle) {
   if (a.bezug?.gegenvorschlagZu) marken.push('<span class="marke">Gegenvorschlag</span>');
 
   const knoepfe = [];
+  let ausgleichHinweis = '';
+  if (a.status === 'offen' && !meiner && a.art === 'ausnahme' && !a.ausgleich) {
+    try {
+      const v = ausgleichVorschlaege({
+        intervalle: d.iv, gesperrt: d.offenBereiche.filter((b) => b.id !== a.id), jetzt: d.jetzt, ausnahme: a,
+      });
+      const k = v.liste[0];
+      if (k) {
+        ausgleichHinweis = `<p class="hinweis">Ohne Ausgleich. Passender Ausgleich: Lotte bei ${wer(k.bei)}, <b>${esc(wtDatumUhr(k.von))} – ${esc(wtDatumUhr(k.bis))}</b> (gleich lang, ${k.abstandTage} Tage später).</p>`;
+        knoepfe.push(`<button class="knopf" data-act="ausgleichGegen" data-id="${a.id}">Mit Ausgleich vorschlagen …</button>`);
+      }
+    } catch { /* Vorschlag ist nur ein Zusatz */ }
+  }
   if (a.status === 'offen') {
     if (meiner) knoepfe.push(`<button class="knopf" data-act="zurueckziehen" data-id="${a.id}">Zurückziehen</button>`);
     else {
@@ -2985,6 +3080,7 @@ function antragKarte(d, a, alle) {
     <ul class="zeilen">${text.join('')}</ul>
     ${bezug ? `<p class="klein">Bezieht sich auf: ${esc(antragZeitraum(bezug))}</p>` : ''}
     ${a.begruendung ? `<p>${esc(a.begruendung)}</p>` : ''}
+    ${ausgleichHinweis}
     ${a.kommentar ? `<p class="kommentar"><b>Kommentar:</b> ${esc(a.kommentar)}</p>` : ''}
     <p class="klein">${esc(person(d, a.antragsteller))} · gestellt ${esc(datumUhrDE(a.erstellt))}${a.entschieden ? ` · entschieden ${esc(datumUhrDE(a.entschieden))} (${esc(person(d, a.entschiedenVon))})` : ''}</p>
     ${marken.length ? `<p>${marken.join(' ')}</p>` : ''}
@@ -3477,6 +3573,7 @@ const Z = __r('engine/zeit.js');
 const { ersterSchultag, anderer } = __r('engine/engine.js');
 const { ausgleichDifferenz, FERIENARTEN } = __r('app/dienst.js');
 const { wiederholungText } = __r('app/serie.js');
+const { ausgleichVorschlaege } = __r('app/ausgleich.js');
 const {
   app, zeigeModal, schliesseModal, modalBox, modalFehler, felder, fange, meldung, ZEITEN,
 } = __r('ui/ctx.js');
@@ -3538,12 +3635,14 @@ function antragFormular(p = {}) {
     if (modus === 'aenderung') { f.bezugId = a.id; f.art = a.art; }
     if (modus === 'gegen') {
       f.gegenId = a.id;
+      f.mitAusgleich = !!p.mitAusgleich;
       f.art = a.art === 'weihnachtsbesuch' ? 'weihnachtsbesuch' : 'ausnahme';
       // Gegenvorschlag zu einer Änderung bleibt eine Änderung derselben Ausnahme
       if (a.art === 'aenderung') f.bezugId = a.bezug.ausnahme;
     }
   }
   F = f;
+  if (f.mitAusgleich && !f.ausgleichAn) { f.ausgleichAn = true; f.avorIdx = 0; fuelleAusgleich(); }
   zeichneFormular();
 }
 
@@ -3556,6 +3655,26 @@ function eingabeAusForm() {
   if (f.ausgleichAn && f.art !== 'weihnachtsbesuch') e.ausgleich = { von: `${f.avd}T${f.avt}`, bis: `${f.abd}T${f.abt}` };
   if (art === 'aenderung') e.bezug = { ausnahme: f.bezugId };
   return e;
+}
+
+/** Trägt den besten (bzw. nächsten) Ausgleichsvorschlag ins Formular ein; ohne Vorschlag bleibt eine manuelle Eingabe. */
+function fuelleAusgleich() {
+  F.ausgleichInfo = '';
+  const v = ausgleichVorschlaege({
+    intervalle: app.d.iv,
+    gesperrt: app.d.offenBereiche.filter((b) => b.id !== F.gegenId),
+    jetzt: app.d.jetzt,
+    ausnahme: { von: `${F.vd}T${F.vt}`, bis: `${F.bd}T${F.bt}`, bei: F.bei },
+  });
+  if (v.keiner) {
+    F.ausgleichInfo = v.grund;
+    if (!F.avd) { F.avd = zuTag(F.vd || F.bd, 7); F.abd = zuTag(F.bd || F.vd, 7); }
+    return;
+  }
+  const k = v.liste[(F.avorIdx ?? 0) % v.liste.length];
+  Object.assign(F, { avd: k.von.slice(0, 10), avt: uhr(k.von), abd: k.bis.slice(0, 10), abt: uhr(k.bis) });
+  F.ausgleichInfo = `Vorschlag ${(F.avorIdx ?? 0) % v.liste.length + 1} von ${v.liste.length}: gleich lang (${String(k.stunden).replace('.', ',')} h), `
+    + `${k.abstandTage} Tage nach der Ausnahme, ${k.ganzerBlock ? 'ganzer Betreuungsblock' : 'beginnt oder endet an einer ohnehin vorhandenen Übergabe'}.`;
 }
 
 function sync() {
@@ -3623,7 +3742,9 @@ function zeichneFormular() {
     ${f.ausgleichAn && !wb ? `<fieldset><legend>Ausgleichszeitraum (Lotte bei ${NAME[anderer(f.bei)]})</legend>
         <div class="zeile"><span>Von</span>${datumFeld('avd', f.avd)}${zeitSelect('avt', f.avt)}</div>
         <div class="zeile"><span>Bis</span>${datumFeld('abd', f.abd)}${zeitSelect('abt', f.abt)}</div>
-        <p id="diff" class="diff">${esc(diffText())}</p></fieldset>` : ''}
+        <p id="diff" class="diff">${esc(diffText())}</p>
+        ${f.ausgleichInfo ? `<p class="klein">${esc(f.ausgleichInfo)}</p>` : ''}
+        <div class="aktionen"><button class="knopf" data-act="ausgleichNeu">Anderen Vorschlag</button></div></fieldset>` : ''}
     ${gegen ? `<label>Kommentar zur Ablehnung (Pflicht)<textarea data-f="kommentar" rows="2">${esc(f.kommentar)}</textarea></label>` : ''}
     <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button><button class="knopf primaer" data-act="formWeiter">Weiter zur Vorschau</button></div>`);
 }
@@ -3636,10 +3757,14 @@ const formAktionen = {
   },
   formAusgleich() {
     sync();
-    if (F.ausgleichAn && !F.avd) {
-      F.avd = zuTag(F.vd || F.bd, 7);
-      F.abd = zuTag(F.bd || F.vd, 7);
-    }
+    if (F.ausgleichAn) { F.avorIdx = 0; fuelleAusgleich(); }
+    zeichneFormular();
+  },
+  ausgleichNeu() {
+    sync();
+    F.avorIdx = (F.avorIdx ?? 0) + 1;
+    F.ausgleichAn = true;
+    fuelleAusgleich();
     zeichneFormular();
   },
   formFeld() {
@@ -4283,6 +4408,10 @@ const aktionen = {
   },
   ablehnenDialog: (el) => ablehnenDialog(el.dataset.id),
   aenderungDialog: (el) => { schliesseModal(); antragFormular({ modus: 'aenderung', antrag: app.d.antraege.find((a) => a.id === el.dataset.id) }); },
+  ausgleichGegen: (el) => antragFormular({
+    modus: 'gegen', mitAusgleich: true, kommentar: 'Gern, aber mit Ausgleich.',
+    antrag: app.d.antraege.find((a) => a.id === el.dataset.id),
+  }),
   stornoDialog: (el) => stornoDialog(el.dataset.id),
   stornoSenden,
   regelDialog,
