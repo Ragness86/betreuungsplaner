@@ -263,7 +263,7 @@ label > .zeile { grid-template-columns: 1fr 6.5rem; }
 <div id="toast" role="status" hidden></div>
 <script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});</script>
 <noscript>Der Betreuungsplaner braucht JavaScript.</noscript>
-<!-- Build 14.11.2026 10:12 -->
+<!-- Build 14.11.2026 10:20 -->
 <script>
 const __m = {}; const __f = {};
 function __r(id) { if (!(id in __m)) __m[id] = __f[id](); return __m[id]; }
@@ -999,11 +999,17 @@ function zufallsId() {
  * @param {() => number} [o.jetzt]  aktuelle lokale Zeit (Minuten, siehe zeit.js)
  * @param {() => string} [o.neueId]
  */
-function erstelleDienst({ speicher, jetzt = () => Z.ausDate(new Date()), neueId = zufallsId }) {
+/**
+ * @param {object} o
+ * @param {(eintrag: object) => Promise<void>} [o.nachProtokoll]  wird nach jedem Verlaufseintrag aufgerufen (Benachrichtigung)
+ */
+function erstelleDienst({ speicher, jetzt = () => Z.ausDate(new Date()), neueId = zufallsId, nachProtokoll = null }) {
   const jetztText = () => Z.format(jetzt());
 
   async function protokoll(kontoId, ereignis, { bezug = null, alt = null, neu = null } = {}) {
-    await speicher.anhaengen('verlauf', { zeit: jetztText(), erstelltMs: Date.now(), kontoId, ereignis, bezug, alt, neu });
+    const eintrag = { zeit: jetztText(), erstelltMs: Date.now(), kontoId, ereignis, bezug, alt, neu };
+    await speicher.anhaengen('verlauf', eintrag);
+    if (nachProtokoll) await nachProtokoll(eintrag);
   }
 
   async function angemeldet() {
@@ -1304,18 +1310,16 @@ function erstelleDienst({ speicher, jetzt = () => Z.ausDate(new Date()), neueId 
       return { ...neu, id };
     },
 
-    // ---- Benachrichtigungen: eigene Geräte-Tokens und Mail-Schalter (Dokument geraete/<Konto-ID>) ----
+    // ---- Benachrichtigungen: eigenes ntfy-Thema und E-Mail-Weiterleitung (Dokument geraete/<Konto-ID>) ----
     async geraete() {
       const ich = await angemeldet();
-      return (await speicher.lesen('geraete', ich.kontoId)) ?? { tokens: [], mail: true };
+      return (await speicher.lesen('geraete', ich.kontoId)) ?? { thema: null, mail: false, email: null };
     },
-    async geraeteSpeichern({ token = null, mail = null, tokenEntfernen = null }) {
+    async geraeteSpeichern({ thema, mail, email }) {
       const ich = await angemeldet();
-      const alt = (await speicher.lesen('geraete', ich.kontoId)) ?? { tokens: [], mail: true };
-      let tokens = alt.tokens ?? [];
-      if (token) tokens = [token, ...tokens.filter((t) => t !== token)].slice(0, 5);
-      if (tokenEntfernen) tokens = tokens.filter((t) => t !== tokenEntfernen);
-      const neu = { tokens, mail: mail ?? alt.mail ?? true };
+      const alt = (await speicher.lesen('geraete', ich.kontoId)) ?? { thema: null, mail: false, email: null };
+      const neu = { thema: thema === undefined ? alt.thema : thema, mail: mail ?? alt.mail ?? false, email: email === undefined ? (alt.email ?? null) : email };
+      if (neu.thema !== null && !/^lotte-[a-z0-9]{12,40}$/.test(neu.thema)) throw new FachFehler('Ungültiges Benachrichtigungs-Thema');
       await speicher.schreiben('geraete', ich.kontoId, neu);
       return neu;
     },
@@ -1734,23 +1738,6 @@ async function erstelleFirebaseSpeicher({
       }
     },
     async abmelden() { await A.signOut(auth); },
-    /** Fragt die Erlaubnis für Benachrichtigungen ab und liefert das Geräte-Token (nur im Browser, nicht in Tests ohne sdk). */
-    async pushToken(vapidKey) {
-      if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) {
-        throw new SpeicherFehler('Dieses Gerät kann hier keine Benachrichtigungen empfangen. iPhone: die App zuerst über Safari zum Home-Bildschirm hinzufügen.');
-      }
-      if ((await Notification.requestPermission()) !== 'granted') {
-        throw new SpeicherFehler('Benachrichtigungen sind blockiert. In den Einstellungen des Geräts oder Browsers für diese Seite erlauben.');
-      }
-      const M = await import(SDK + 'firebase-messaging.js');
-      if (!(await M.isSupported())) throw new SpeicherFehler('Dieser Browser unterstützt keine Push-Nachrichten.');
-      const reg = await navigator.serviceWorker.ready;
-      try {
-        return await M.getToken(M.getMessaging(fbApp), { vapidKey, serviceWorkerRegistration: reg });
-      } catch (e) {
-        throw new SpeicherFehler(`Benachrichtigungen konnten nicht aktiviert werden (${e?.code ?? e?.message})`);
-      }
-    },
     /** Ruft f auf, sobald (auch verspätet) ein Konto angemeldet ist. */
     beiAnmeldung(f) { return A.onAuthStateChanged(auth, (u) => { if (u) f(); }); },
 
@@ -1804,15 +1791,104 @@ const FIREBASE_CONFIG = {
   appId: '1:512101772770:web:168bf859371a42e1eeddbb',
 };
 
-// Öffentlicher Web-Push-Schlüssel (Firebase-Konsole > Projekteinstellungen > Cloud Messaging > Web-Push-Zertifikate).
-// Er ist kein Geheimnis. Leer = Push-Knopf in der App ist aus. Anleitung: docs/benachrichtigungen.md
-const VAPID_KEY = '';
-
 // Bewusst leer: Diese Datei landet in der öffentlich abrufbaren Seite, E-Mail-Adressen gehören nicht hinein.
 // Wer den Plan einrichten und nutzen darf, legen allein die Regeln in firestore.rules fest (nur in der Firebase-Konsole).
 const PAPA_EMAIL = '';
 
-return { FIREBASE_CONFIG, VAPID_KEY, PAPA_EMAIL };
+return { FIREBASE_CONFIG, PAPA_EMAIL };
+};
+__f['app/benachrichtigung.js'] = function () {
+// Benachrichtigungen über ntfy (https://ntfy.sh): kostenlos, ohne Server, ohne Kosten bei Firebase.
+// Wer etwas tut (Antrag, Antwort, Termin …), dessen App schickt dem ANDEREN Elternteil eine Push-Nachricht an
+// dessen geheimes ntfy-Thema (zufällig erzeugt, gespeichert in geraete/<Konto-ID>, nur für die beiden lesbar).
+// Optional leitet ntfy die Nachricht zusätzlich als E-Mail weiter.
+
+const ARTEN = {
+  ausnahme: 'Ausnahme', ausnahme_mit_ausgleich: 'Ausnahme mit Ausgleich', weihnachtsbesuch: 'Weihnachtsbesuch',
+  aenderung: 'Änderung', storno: 'Storno', regelaenderung: 'Regeländerung',
+};
+
+const TITEL = {
+  antrag_gestellt: (w) => `Neuer Antrag von ${w}`,
+  gegenvorschlag: (w) => `Gegenvorschlag von ${w}`,
+  antrag_bestaetigt: (w) => `${w} hat bestätigt`,
+  antrag_abgelehnt: (w) => `${w} hat abgelehnt`,
+  antrag_zurueckgezogen: (w) => `${w} hat einen Antrag zurückgezogen`,
+  ausnahme_storniert: (w) => `${w}: Ausnahme storniert`,
+  regelaenderung_beantragt: (w) => `Regeländerung von ${w}`,
+  regelaenderung_bestaetigt: (w) => `${w} hat die Regeländerung bestätigt`,
+  regelaenderung_abgelehnt: (w) => `${w} hat die Regeländerung abgelehnt`,
+  termin_angelegt: (w) => `${w}: neuer Termin für Lotte`,
+  termin_geaendert: (w) => `${w}: Termin geändert`,
+  termin_abgesagt: (w) => `${w}: Termin abgesagt`,
+  termin_ausgefallen: (w) => `${w}: Termin der Serie abgesagt`,
+  ferien_angelegt: (w) => `${w}: Ferientermin angelegt`,
+  ferien_geaendert: (w) => `${w}: Ferientermin geändert`,
+};
+
+/** Ereignisse, über die der andere Elternteil informiert wird. */
+const MELDEN = Object.keys(TITEL);
+
+const NTFY = 'https://ntfy.sh';
+const APP_URL = 'https://ragness86.github.io/betreuungsplaner/';
+
+const datum = (s) => (s ? `${s.slice(8, 10)}.${s.slice(5, 7)}.${s.slice(0, 4)}${s.length > 10 ? ` ${s.slice(11, 16)}` : ''}` : '');
+
+/** v = Verlaufseintrag, antrag = Antragsdokument (oder null), akteur = "Papa"/"Mama". Gibt { titel, text } oder null. */
+function nachricht(v, antrag, akteur) {
+  const t = TITEL[v.ereignis];
+  if (!t) return null;
+  const a = v.neu && typeof v.neu === 'object' && (v.neu.art || v.neu.titel) ? v.neu : antrag;
+  let text = '';
+  if (a?.titel) text = `${a.titel}${a.von ? `, ${datum(a.von)}` : ''}`;
+  else if (a?.art === 'regelaenderung') text = `Regeländerung ab ${datum(a.gueltigAb)}`;
+  else if (a?.von) text = `${ARTEN[a.art] ?? 'Antrag'}: ${datum(a.von)} – ${datum(a.bis)}`;
+  else if (a?.erster) text = `${a.art ?? 'Ferien'} ${a.schuljahr ?? ''}: ${datum(a.erster)} – ${datum(a.letzter)}`;
+  if (v.ereignis === 'termin_ausgefallen' && typeof v.neu === 'string') text = v.neu;
+  return { titel: t(akteur), text: text || 'Details in der App' };
+}
+
+/** Zufälliges, nicht erratbares Thema (ntfy-Themen sind öffentlich, wer den Namen kennt, liest mit). */
+function neuesThema(zufall = () => crypto.getRandomValues(new Uint8Array(16))) {
+  const z = [...zufall()].map((b) => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join('');
+  return `lotte-${z}`;
+}
+
+/** Baut die ntfy-Nachricht (JSON-Veröffentlichung, damit Umlaute sicher ankommen). */
+function ntfyNachricht(thema, n, email = null) {
+  return {
+    topic: thema, title: n.titel, message: n.text, click: APP_URL, tags: ['calendar'],
+    ...(email ? { email } : {}),
+  };
+}
+
+/**
+ * Liefert die Funktion, die der Dienst nach jedem Verlaufseintrag aufruft.
+ * Fehler beim Senden werden nur gemeldet (melde), nie weitergeworfen: Die eigentliche Aktion ist dann schon gespeichert.
+ */
+function erstelleMelder({ speicher, senden = (body) => fetch(NTFY, { method: 'POST', body: JSON.stringify(body), signal: AbortSignal.timeout?.(6000) }), melde = () => {} }) {
+  return async (eintrag) => {
+    try {
+      if (!MELDEN.includes(eintrag.ereignis)) return;
+      const rollen = await speicher.lesen('config', 'rollen');
+      if (!rollen?.papa || !rollen?.mama) return;
+      const akteur = eintrag.kontoId === rollen.papa ? 'papa' : eintrag.kontoId === rollen.mama ? 'mama' : null;
+      if (!akteur) return;
+      const empfaenger = akteur === 'papa' ? rollen.mama : rollen.papa;
+      const g = await speicher.lesen('geraete', empfaenger);
+      if (!g?.thema) return;
+      const antrag = eintrag.bezug ? await speicher.lesen('antraege', eintrag.bezug).catch(() => null) : null;
+      const n = nachricht(eintrag, antrag, akteur === 'papa' ? 'Papa' : 'Mama');
+      if (!n) return;
+      const r = await senden(ntfyNachricht(g.thema, n, g.mail ? g.email : null));
+      if (r && r.ok === false) melde('Benachrichtigung konnte nicht gesendet werden.');
+    } catch {
+      melde('Benachrichtigung konnte nicht gesendet werden.');
+    }
+  };
+}
+
+return { MELDEN, NTFY, APP_URL, nachricht, neuesThema, ntfyNachricht, erstelleMelder };
 };
 __f['ui/ctx.js'] = function () {
 // Gemeinsamer Anwendungszustand und kleine DOM-Helfer (Modal, Meldungen).
@@ -3838,7 +3914,8 @@ const { erstelleDienst, MELDUNG } = __r('app/dienst.js');
 const { erstelleLocalStorageSpeicher } = __r('speicher/localstorage.js');
 const { DEV_KONTEN } = __r('speicher/inmemory.js');
 const { erstelleFirebaseSpeicher } = __r('speicher/firebase.js');
-const { FIREBASE_CONFIG, PAPA_EMAIL, VAPID_KEY } = __r('data/firebase-config.js');
+const { FIREBASE_CONFIG, PAPA_EMAIL } = __r('data/firebase-config.js');
+const { erstelleMelder, neuesThema, ntfyNachricht, NTFY } = __r('app/benachrichtigung.js');
 const { app, meldung, zeigeModal, schliesseModal, fange, modalFehler } = __r('ui/ctx.js');
 const { ladeDaten, betreuungsjahrZu } = __r('ui/daten.js');
 const { esc, NAME, download, datumDE } = __r('ui/util.js');
@@ -3896,7 +3973,9 @@ async function start() {
   app.speicher = window.__BETREUUNG_ADAPTER__
     ?? (lokal ? erstelleLocalStorageSpeicher() : await erstelleFirebaseSpeicher({ config: FIREBASE_CONFIG, papaEmail: PAPA_EMAIL }));
   await app.speicher.bereit?.();
-  app.dienst = erstelleDienst({ speicher: app.speicher, jetzt: jetztFn });
+  // Benachrichtigungen nur im echten Betrieb (nicht im lokalen Entwicklungsmodus)
+  const nachProtokoll = app.dev ? null : erstelleMelder({ speicher: app.speicher, melde: (t) => meldung(t, 'fehler') });
+  app.dienst = erstelleDienst({ speicher: app.speicher, jetzt: jetztFn, nachProtokoll });
   app.neuLaden = neuLaden;
   app.zeichne = zeichne;
 
@@ -4030,14 +4109,26 @@ function installKarte() {
 }
 
 function benachrichtigungKarte(d) {
-  if (!app.speicher.pushToken || !VAPID_KEY) return '';
   const g = d.geraete;
-  if (!g) return '<h3>Benachrichtigungen</h3><p class="klein">Noch nicht freigeschaltet (neue Regeln in Firebase fehlen).</p>';
-  const geraetAn = typeof Notification !== 'undefined' && Notification.permission === 'granted' && g.tokens.length > 0;
+  if (!g) return '<h3>Benachrichtigungen</h3><p class="klein">Noch nicht freigeschaltet: Die neuen Regeln (firestore.rules) müssen in der Firebase-Konsole veröffentlicht werden.</p>';
+  const andere = NAME[d.ich.rolle === 'papa' ? 'mama' : 'papa'];
+  if (!g.thema) {
+    return `<h3>Benachrichtigungen</h3>
+      <p class="klein">Push-Nachricht aufs Handy, wenn ${andere} einen Antrag stellt, antwortet oder einen Termin einträgt. Kostenlos über die App <b>ntfy</b>.</p>
+      <ol class="klein"><li>ntfy installieren: <a href="https://play.google.com/store/apps/details?id=io.heckel.ntfy" target="_blank" rel="noopener">Android</a> · <a href="https://apps.apple.com/app/ntfy/id1625396347" target="_blank" rel="noopener">iPhone</a></li>
+      <li>Hier auf „Einrichten“ tippen, dann das angezeigte Thema in ntfy abonnieren.</li></ol>
+      <div class="aktionen"><button class="knopf primaer" data-act="ntfyEinrichten">Einrichten</button></div>`;
+  }
+  const email = app.speicher.email?.() ?? g.email;
   return `<h3>Benachrichtigungen</h3>
-    <p class="klein">Bei Anträgen, Antworten und Terminen des anderen Elternteils: Push-Nachricht aufs Handy und E-Mail. ${g.tokens.length ? `${g.tokens.length} Gerät(e) angemeldet.` : 'Noch kein Gerät angemeldet.'}</p>
-    <div class="aktionen"><button class="knopf${geraetAn ? '' : ' primaer'}" data-act="pushAn">${geraetAn ? 'Dieses Gerät erneut anmelden' : 'Auf diesem Gerät aktivieren'}</button>
-    <button class="knopf" data-act="mailUmschalten">E-Mail: ${g.mail === false ? 'aus (einschalten)' : 'an (ausschalten)'}</button></div>`;
+    <p class="klein">Aktiv. In der ntfy-App (Server ntfy.sh) dieses Thema abonnieren: „+“ antippen und eintragen. Das Thema ist geheim, wer es kennt, liest mit.</p>
+    <p><code>${esc(g.thema)}</code></p>
+    <div class="aktionen"><button class="knopf" data-act="ntfyKopieren">Thema kopieren</button>
+      <a class="knopf" href="ntfy://ntfy.sh/${esc(g.thema)}">In ntfy öffnen</a>
+      <button class="knopf" data-act="ntfyTest">Testnachricht</button></div>
+    ${email ? `<label class="check"><input type="checkbox" data-change="mailUmschalten"${g.mail ? ' checked' : ''}> Zusätzlich per E-Mail an ${esc(email)}</label>` : ''}
+    <details class="aufklapp"><summary>Weitere Einstellungen</summary>
+      <div class="aktionen"><button class="knopf" data-act="ntfyNeu">Neues Thema erzeugen</button><button class="knopf" data-act="ntfyAus">Benachrichtigungen ausschalten</button></div></details>`;
 }
 
 function mehrSeite(d) {
@@ -4101,18 +4192,35 @@ const aktionen = {
   rhythmusAntrag: (el) => rhythmusAntragDialog(el.dataset.stichtag),
   rhythmusSenden,
   rhythmusPruefen,
-  async pushAn() {
-    const ok = await fange(async () => {
-      const token = await app.speicher.pushToken(VAPID_KEY);
-      await app.dienst.geraeteSpeichern({ token });
-    });
+  async ntfyEinrichten() {
+    const ok = await fange(() => app.dienst.geraeteSpeichern({ thema: neuesThema() }));
     if (!ok) return;
     await neuLaden();
-    meldung('Benachrichtigungen sind auf diesem Gerät aktiv', 'ok');
+    meldung('Eingerichtet. Jetzt das Thema in der ntfy-App abonnieren.', 'ok');
   },
-  async mailUmschalten() {
-    const ok = await fange(() => app.dienst.geraeteSpeichern({ mail: app.d.geraete?.mail === false }));
+  async ntfyNeu() {
+    const ok = await fange(() => app.dienst.geraeteSpeichern({ thema: neuesThema() }));
+    if (!ok) return;
+    await neuLaden();
+    meldung('Neues Thema erzeugt. Das alte in ntfy abbestellen, das neue abonnieren.', 'ok');
+  },
+  async ntfyAus() {
+    const ok = await fange(() => app.dienst.geraeteSpeichern({ thema: null, mail: false }));
+    if (ok) { await neuLaden(); meldung('Benachrichtigungen ausgeschaltet', 'ok'); }
+  },
+  async mailUmschalten(el) {
+    const ok = await fange(() => app.dienst.geraeteSpeichern({ mail: el.checked, email: app.speicher.email?.() ?? app.d.geraete?.email ?? null }));
     if (ok) await neuLaden();
+  },
+  async ntfyKopieren() {
+    try { await navigator.clipboard.writeText(app.d.geraete.thema); meldung('Thema kopiert', 'ok'); } catch { meldung('Kopieren nicht möglich, bitte von Hand abschreiben', 'fehler'); }
+  },
+  async ntfyTest() {
+    const g = app.d.geraete;
+    try {
+      const r = await fetch(NTFY, { method: 'POST', body: JSON.stringify(ntfyNachricht(g.thema, { titel: 'Betreuungsplaner Lotte', text: 'Testnachricht: Benachrichtigungen funktionieren.' }, g.mail ? g.email : null)) });
+      meldung(r.ok ? 'Testnachricht gesendet' : `ntfy antwortet mit Fehler ${r.status}`, r.ok ? 'ok' : 'fehler');
+    } catch { meldung('Keine Verbindung zu ntfy.sh', 'fehler'); }
   },
   async appInstallieren() {
     if (!installEreignis) return;
