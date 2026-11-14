@@ -263,7 +263,7 @@ label > .zeile { grid-template-columns: 1fr 6.5rem; }
 <div id="toast" role="status" hidden></div>
 <script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});</script>
 <noscript>Der Betreuungsplaner braucht JavaScript.</noscript>
-<!-- Build 14.11.2026 10:20 -->
+<!-- Build 14.11.2026 10:27 -->
 <script>
 const __m = {}; const __f = {};
 function __r(id) { if (!(id in __m)) __m[id] = __f[id](); return __m[id]; }
@@ -1797,6 +1797,144 @@ const PAPA_EMAIL = '';
 
 return { FIREBASE_CONFIG, PAPA_EMAIL };
 };
+__f['app/rhythmus.js'] = function () {
+// Rhythmus-Assistent: Ausgleichswoche als Rhythmuswechsel nutzen, wenn dadurch Weihnachten/Neujahr aufgeht.
+//
+// Hintergrund: Frühjahr und Herbst gehören je nach Sommerrotation einem festen Elternteil. Fällt die Ferienwoche laut
+// Rhythmus dem anderen zu, bekommt dieser die Folgewoche als Ausgleich (Werktagstausch, Regel 4). Statt dieses
+// Ausgleichs kann der Rhythmus am Freitag der Ferienwoche umgedreht werden (gerade <-> ungerade): Der Benachteiligte
+// bekommt ab Freitag 15:00 eine volle Woche, danach läuft der Rhythmus andersherum. Das lohnt nur, wenn dadurch
+// die letzte Woche des Jahres und die erste des Folgejahres (Weihnachten/Neujahr) ohne Doppelwoche aufgehen.
+// Geht Weihnachten ohnehin auf, gibt es keinen Vorschlag.
+//
+// Technisch ist der Wechsel eine normale Regeländerung von rhythmus.referenzBei mit Stichtag. Reine Funktionen.
+
+const Z = __r('engine/zeit.js');
+const { berechnePlan, betreuungsjahre, bilanz, anderer, ersterSchultag, ferienAbgedecktBis } = __r('engine/engine.js');
+
+/** Zulässige Abweichung der Nächte vom Mittel je Betreuungsjahr ("184 ± 2" bei 364 Nächten), mindestens der heutige Stand. */
+const TOLERANZ_NAECHTE = 2;
+/** Ein Block über so viele Tage am Stück beim selben Elternteil gilt als Doppelwoche. */
+const LANG_TAGE = 10;
+
+const TAG = Z.MINUTEN_PRO_TAG;
+const FERIEN_NAME = { fruehjahr: 'Frühjahr', herbst: 'Herbst' };
+
+function schulbeginnTag(f) {
+  return f.schulbeginn ? Z.tag(Z.parse(f.schulbeginn)) : ersterSchultag(f.letzter);
+}
+
+/** Zusammenhängende Betreuungsblöcke (gleicher Elternteil lückenlos). */
+function bloecke(intervalle) {
+  const out = [];
+  for (const iv of intervalle) {
+    if (iv.vorlaeufig) continue;
+    const l = out.at(-1);
+    if (l && l.bei === iv.bei && l.bis === iv.von) l.bis = iv.bis;
+    else out.push({ von: iv.von, bis: iv.bis, bei: iv.bei });
+  }
+  return out;
+}
+
+const blockText = (b) => ({ von: Z.format(b.von), bis: Z.format(b.bis), bei: b.bei, tage: Math.round(((b.bis - b.von) / TAG) * 10) / 10 });
+
+/** Weihnachten/Neujahr eines Jahres: geht auf, wenn kein Block über LANG_TAGE den Zeitraum Ferienbeginn bis Schulbeginn berührt. */
+function weihnachtsLage(bl, w) {
+  const lang = bl.filter((b) => b.von < w.bis && w.von < b.bis && (b.bis - b.von) / TAG > LANG_TAGE).map(blockText);
+  return { aufgeht: lang.length === 0, lang };
+}
+
+/**
+ * @param {object} e
+ * @param {object[]} e.regeln  alle Regelversionen
+ * @param {object[]} e.ferien
+ * @param {object[]} [e.antraege]
+ * @param {number} e.jetzt     Minutenwert; Stichtage liegen danach
+ */
+function rhythmusAnalyse({ regeln, ferien, antraege = [], jetzt }) {
+  const versionen = [...regeln].sort((a, b) => (a.gueltigAb < b.gueltigAb ? -1 : 1));
+  const letzte = versionen.at(-1);
+  const horizont = ferienAbgedecktBis(versionen, ferien);
+  if (horizont === null) return { weihnachten: [], kandidaten: [], vorschlaege: [], pruefe: () => null };
+  const zeitraum = { von: versionen[0].planbeginn, bis: Z.format(horizont) };
+  const jahre = betreuungsjahre(versionen, ferien).filter((j) => Z.parse(j.bis) <= horizont);
+  const basisPlan = berechnePlan({ regeln: versionen, ferien, antraege, zeitraum });
+  const basisIv = basisPlan._intern.intervalle;
+  const basisBl = bloecke(basisIv);
+
+  const weihnachtsZeiten = ferien.filter((f) => f.art === 'weihnachten')
+    .map((f) => ({ jahr: Z.jahr(Z.parse(f.erster)), von: Z.parse(f.erster), bis: schulbeginnTag(f) }))
+    .filter((w) => w.bis <= horizont)
+    .sort((a, b) => a.von - b.von);
+  const weihnachten = weihnachtsZeiten.filter((w) => w.bis > jetzt).map((w) => ({ jahr: w.jahr, ...weihnachtsLage(basisBl, w) }));
+
+  const r = letzte.rhythmus;
+  const ref = Z.parse(r.referenzBeginn);
+  const zyklus = r.zyklusTage * TAG;
+  const moeglich = (s) => s > jetzt && s >= Z.parse(letzte.gueltigAb) && s < horizont;
+  const naechte = (iv, j) => {
+    const n = bilanz(iv, Z.parse(j.von), Z.parse(j.bis)).naechte;
+    return { jahr: j.jahr, papa: n.papa, mama: n.mama, abw: Math.abs(n.papa - n.mama) / 2 };
+  };
+
+  /** Bewertet einen Rhythmuswechsel am Wechselzeitpunkt s. */
+  const bewerte = (s, extra = {}) => {
+    const neu = { ...letzte, rhythmus: { ...r, referenzBei: anderer(r.referenzBei) }, gueltigAb: Z.format(s) };
+    const plan = berechnePlan({ regeln: [...versionen, neu], ferien, antraege, zeitraum });
+    const iv = plan._intern.intervalle;
+    const bl = bloecke(iv);
+    const wirkung = weihnachtsZeiten.filter((w) => w.bis > s)
+      .map((w) => ({ jahr: w.jahr, vorher: weihnachtsLage(basisBl, w), nachher: weihnachtsLage(bl, w) }));
+    const ziel = wirkung[0] ?? null;
+    // Verteilung: das Betreuungsjahr des Wechsels und das folgende (Weihnachten liegt am Übergang)
+    const bj = jahre.filter((j) => Z.parse(j.bis) > s).slice(0, 2)
+      .map((j) => ({ ...naechte(iv, j), vorher: naechte(basisIv, j) }));
+    const verteilungOk = bj.every((j) => j.abw <= Math.max(TOLERANZ_NAECHTE, j.vorher.abw));
+    let grund = null;
+    if (!ziel) grund = 'Danach ist kein Weihnachten mit Ferienterminen hinterlegt.';
+    else if (ziel.vorher.aufgeht) grund = `Weihnachten ${ziel.jahr} geht bereits auf.`;
+    else if (ziel.nachher.lang.length >= ziel.vorher.lang.length) grund = `Weihnachten ${ziel.jahr} wird dadurch nicht besser.`;
+    else if (!verteilungOk) grund = 'Die Nächte je Betreuungsjahr würden zu ungleich.';
+    return {
+      stichtag: Z.format(s),
+      parameter: { rhythmus: { referenzBei: anderer(r.referenzBei) } },
+      ziel, spaeter: wirkung.slice(1), jahre: bj, verteilungOk,
+      vorschlag: grund === null, grund,
+      ...extra,
+    };
+  };
+
+  // Kandidaten: jede Ausgleichswoche aus dem Werktagstausch (Frühjahr/Herbst) im heutigen Plan.
+  // Der Wechsel liegt am Freitag der Ferienwoche (letzter Rhythmus-Wechselzeitpunkt vor Beginn der Ausgleichswoche).
+  const kandidaten = [];
+  for (const iv of basisIv) {
+    const m = /^Ausgleich (Frühjahr|Herbst)$/.exec(iv.grund ?? '');
+    if (!m || iv.vorlaeufig) continue;
+    const s = ref + Math.floor((iv.von - ref) / zyklus) * zyklus;
+    if (!moeglich(s) || kandidaten.some((k) => k.stichtag === Z.format(s))) continue;
+    const art = m[1] === 'Herbst' ? 'herbst' : 'fruehjahr';
+    kandidaten.push(bewerte(s, {
+      ferien: `${FERIEN_NAME[art]} ${Z.jahr(iv.von)}`,
+      bekommt: iv.bei, // erhält statt der Ausgleichswoche eine volle Woche ab Freitag
+      ausgleich: { von: Z.format(iv.von), bis: Z.format(iv.bis), bei: iv.bei },
+    }));
+  }
+  const vorschlaege = kandidaten.filter((k) => k.vorschlag)
+    .sort((a, b) => a.ziel.nachher.lang.length - b.ziel.nachher.lang.length || (a.stichtag < b.stichtag ? -1 : 1));
+
+  /** Frei gewählter Wechsel: erster Rhythmus-Wechselzeitpunkt ab `datum` (YYYY-MM-DD); null, wenn nicht möglich. */
+  const pruefe = (datum) => {
+    const t = Z.tag(Z.parse(datum));
+    const s = ref + Math.ceil((t - ref) / zyklus) * zyklus;
+    if (!moeglich(s)) return null;
+    return kandidaten.find((k) => k.stichtag === Z.format(s)) ?? bewerte(s, { eigen: true });
+  };
+
+  return { weihnachten, kandidaten, vorschlaege, pruefe };
+}
+
+return { TOLERANZ_NAECHTE, LANG_TAGE, bloecke, rhythmusAnalyse };
+};
 __f['app/benachrichtigung.js'] = function () {
 // Benachrichtigungen über ntfy (https://ntfy.sh): kostenlos, ohne Server, ohne Kosten bei Firebase.
 // Wer etwas tut (Antrag, Antwort, Termin …), dessen App schickt dem ANDEREN Elternteil eine Push-Nachricht an
@@ -1866,8 +2004,30 @@ function ntfyNachricht(thema, n, email = null) {
  * Liefert die Funktion, die der Dienst nach jedem Verlaufseintrag aufruft.
  * Fehler beim Senden werden nur gemeldet (melde), nie weitergeworfen: Die eigentliche Aktion ist dann schon gespeichert.
  */
-function erstelleMelder({ speicher, senden = (body) => fetch(NTFY, { method: 'POST', body: JSON.stringify(body), signal: AbortSignal.timeout?.(6000) }), melde = () => {} }) {
+/** Ereignisse, nach denen sich Rhythmus-Vorschläge ändern können (neue Ferientermine, bestätigte Regeländerung). */
+const RHYTHMUS_ANLASS = ['ferien_angelegt', 'ferien_geaendert', 'regelaenderung_bestaetigt'];
+
+function erstelleMelder({ speicher, senden = (body) => fetch(NTFY, { method: 'POST', body: JSON.stringify(body), signal: AbortSignal.timeout?.(6000) }), melde = () => {}, vorschlaege = null, gemeldet = { lesen: () => [], schreiben: () => {} } }) {
+  /** Neue Rhythmus-Vorschläge (noch nicht gemeldet) gehen an den anderen Elternteil. vorschlaege() liefert [{ schluessel, text }]. */
+  async function rhythmusMelden(eintrag) {
+    if (!vorschlaege || !RHYTHMUS_ANLASS.includes(eintrag.ereignis)) return;
+    const alle = await vorschlaege();
+    const bekannt = gemeldet.lesen();
+    const neu = alle.filter((v) => !bekannt.includes(v.schluessel));
+    gemeldet.schreiben(alle.map((v) => v.schluessel)); // erledigte Vorschläge fallen so wieder heraus
+    if (!neu.length) return;
+    const rollen = await speicher.lesen('config', 'rollen');
+    if (!rollen?.papa || !rollen?.mama) return;
+    const empfaenger = eintrag.kontoId === rollen.papa ? rollen.mama : eintrag.kontoId === rollen.mama ? rollen.papa : null;
+    if (!empfaenger) return;
+    const g = await speicher.lesen('geraete', empfaenger);
+    if (!g?.thema) return;
+    const n = { titel: 'Neuer Rhythmus-Vorschlag', text: `${neu.map((v) => v.text).join('; ')}. Details im Rhythmus-Assistenten.` };
+    const r = await senden(ntfyNachricht(g.thema, n, g.mail ? g.email : null));
+    if (r && r.ok === false) melde('Benachrichtigung konnte nicht gesendet werden.');
+  }
   return async (eintrag) => {
+    try { await rhythmusMelden(eintrag); } catch { /* Vorschläge sind nur ein Zusatz */ }
     try {
       if (!MELDEN.includes(eintrag.ereignis)) return;
       const rollen = await speicher.lesen('config', 'rollen');
@@ -1888,7 +2048,7 @@ function erstelleMelder({ speicher, senden = (body) => fetch(NTFY, { method: 'PO
   };
 }
 
-return { MELDEN, NTFY, APP_URL, nachricht, neuesThema, ntfyNachricht, erstelleMelder };
+return { MELDEN, NTFY, APP_URL, nachricht, neuesThema, ntfyNachricht, RHYTHMUS_ANLASS, erstelleMelder };
 };
 __f['ui/ctx.js'] = function () {
 // Gemeinsamer Anwendungszustand und kleine DOM-Helfer (Modal, Meldungen).
@@ -2246,144 +2406,6 @@ function download(dateiname, inhalt, typ) {
 }
 
 return { NAME, MONATE, ARTEN_TEXT, STATUS_TEXT, esc, wt, wtLang, datumDE, kurzDatumDE, uhr, datumUhrDE, wtDatumUhr, monatsname, zahl, mitVorzeichen, prozent, saldoText, ostersonntag, feiertage, monatsTage, download };
-};
-__f['app/rhythmus.js'] = function () {
-// Rhythmus-Assistent: Ausgleichswoche als Rhythmuswechsel nutzen, wenn dadurch Weihnachten/Neujahr aufgeht.
-//
-// Hintergrund: Frühjahr und Herbst gehören je nach Sommerrotation einem festen Elternteil. Fällt die Ferienwoche laut
-// Rhythmus dem anderen zu, bekommt dieser die Folgewoche als Ausgleich (Werktagstausch, Regel 4). Statt dieses
-// Ausgleichs kann der Rhythmus am Freitag der Ferienwoche umgedreht werden (gerade <-> ungerade): Der Benachteiligte
-// bekommt ab Freitag 15:00 eine volle Woche, danach läuft der Rhythmus andersherum. Das lohnt nur, wenn dadurch
-// die letzte Woche des Jahres und die erste des Folgejahres (Weihnachten/Neujahr) ohne Doppelwoche aufgehen.
-// Geht Weihnachten ohnehin auf, gibt es keinen Vorschlag.
-//
-// Technisch ist der Wechsel eine normale Regeländerung von rhythmus.referenzBei mit Stichtag. Reine Funktionen.
-
-const Z = __r('engine/zeit.js');
-const { berechnePlan, betreuungsjahre, bilanz, anderer, ersterSchultag, ferienAbgedecktBis } = __r('engine/engine.js');
-
-/** Zulässige Abweichung der Nächte vom Mittel je Betreuungsjahr ("184 ± 2" bei 364 Nächten), mindestens der heutige Stand. */
-const TOLERANZ_NAECHTE = 2;
-/** Ein Block über so viele Tage am Stück beim selben Elternteil gilt als Doppelwoche. */
-const LANG_TAGE = 10;
-
-const TAG = Z.MINUTEN_PRO_TAG;
-const FERIEN_NAME = { fruehjahr: 'Frühjahr', herbst: 'Herbst' };
-
-function schulbeginnTag(f) {
-  return f.schulbeginn ? Z.tag(Z.parse(f.schulbeginn)) : ersterSchultag(f.letzter);
-}
-
-/** Zusammenhängende Betreuungsblöcke (gleicher Elternteil lückenlos). */
-function bloecke(intervalle) {
-  const out = [];
-  for (const iv of intervalle) {
-    if (iv.vorlaeufig) continue;
-    const l = out.at(-1);
-    if (l && l.bei === iv.bei && l.bis === iv.von) l.bis = iv.bis;
-    else out.push({ von: iv.von, bis: iv.bis, bei: iv.bei });
-  }
-  return out;
-}
-
-const blockText = (b) => ({ von: Z.format(b.von), bis: Z.format(b.bis), bei: b.bei, tage: Math.round(((b.bis - b.von) / TAG) * 10) / 10 });
-
-/** Weihnachten/Neujahr eines Jahres: geht auf, wenn kein Block über LANG_TAGE den Zeitraum Ferienbeginn bis Schulbeginn berührt. */
-function weihnachtsLage(bl, w) {
-  const lang = bl.filter((b) => b.von < w.bis && w.von < b.bis && (b.bis - b.von) / TAG > LANG_TAGE).map(blockText);
-  return { aufgeht: lang.length === 0, lang };
-}
-
-/**
- * @param {object} e
- * @param {object[]} e.regeln  alle Regelversionen
- * @param {object[]} e.ferien
- * @param {object[]} [e.antraege]
- * @param {number} e.jetzt     Minutenwert; Stichtage liegen danach
- */
-function rhythmusAnalyse({ regeln, ferien, antraege = [], jetzt }) {
-  const versionen = [...regeln].sort((a, b) => (a.gueltigAb < b.gueltigAb ? -1 : 1));
-  const letzte = versionen.at(-1);
-  const horizont = ferienAbgedecktBis(versionen, ferien);
-  if (horizont === null) return { weihnachten: [], kandidaten: [], vorschlaege: [], pruefe: () => null };
-  const zeitraum = { von: versionen[0].planbeginn, bis: Z.format(horizont) };
-  const jahre = betreuungsjahre(versionen, ferien).filter((j) => Z.parse(j.bis) <= horizont);
-  const basisPlan = berechnePlan({ regeln: versionen, ferien, antraege, zeitraum });
-  const basisIv = basisPlan._intern.intervalle;
-  const basisBl = bloecke(basisIv);
-
-  const weihnachtsZeiten = ferien.filter((f) => f.art === 'weihnachten')
-    .map((f) => ({ jahr: Z.jahr(Z.parse(f.erster)), von: Z.parse(f.erster), bis: schulbeginnTag(f) }))
-    .filter((w) => w.bis <= horizont)
-    .sort((a, b) => a.von - b.von);
-  const weihnachten = weihnachtsZeiten.filter((w) => w.bis > jetzt).map((w) => ({ jahr: w.jahr, ...weihnachtsLage(basisBl, w) }));
-
-  const r = letzte.rhythmus;
-  const ref = Z.parse(r.referenzBeginn);
-  const zyklus = r.zyklusTage * TAG;
-  const moeglich = (s) => s > jetzt && s >= Z.parse(letzte.gueltigAb) && s < horizont;
-  const naechte = (iv, j) => {
-    const n = bilanz(iv, Z.parse(j.von), Z.parse(j.bis)).naechte;
-    return { jahr: j.jahr, papa: n.papa, mama: n.mama, abw: Math.abs(n.papa - n.mama) / 2 };
-  };
-
-  /** Bewertet einen Rhythmuswechsel am Wechselzeitpunkt s. */
-  const bewerte = (s, extra = {}) => {
-    const neu = { ...letzte, rhythmus: { ...r, referenzBei: anderer(r.referenzBei) }, gueltigAb: Z.format(s) };
-    const plan = berechnePlan({ regeln: [...versionen, neu], ferien, antraege, zeitraum });
-    const iv = plan._intern.intervalle;
-    const bl = bloecke(iv);
-    const wirkung = weihnachtsZeiten.filter((w) => w.bis > s)
-      .map((w) => ({ jahr: w.jahr, vorher: weihnachtsLage(basisBl, w), nachher: weihnachtsLage(bl, w) }));
-    const ziel = wirkung[0] ?? null;
-    // Verteilung: das Betreuungsjahr des Wechsels und das folgende (Weihnachten liegt am Übergang)
-    const bj = jahre.filter((j) => Z.parse(j.bis) > s).slice(0, 2)
-      .map((j) => ({ ...naechte(iv, j), vorher: naechte(basisIv, j) }));
-    const verteilungOk = bj.every((j) => j.abw <= Math.max(TOLERANZ_NAECHTE, j.vorher.abw));
-    let grund = null;
-    if (!ziel) grund = 'Danach ist kein Weihnachten mit Ferienterminen hinterlegt.';
-    else if (ziel.vorher.aufgeht) grund = `Weihnachten ${ziel.jahr} geht bereits auf.`;
-    else if (ziel.nachher.lang.length >= ziel.vorher.lang.length) grund = `Weihnachten ${ziel.jahr} wird dadurch nicht besser.`;
-    else if (!verteilungOk) grund = 'Die Nächte je Betreuungsjahr würden zu ungleich.';
-    return {
-      stichtag: Z.format(s),
-      parameter: { rhythmus: { referenzBei: anderer(r.referenzBei) } },
-      ziel, spaeter: wirkung.slice(1), jahre: bj, verteilungOk,
-      vorschlag: grund === null, grund,
-      ...extra,
-    };
-  };
-
-  // Kandidaten: jede Ausgleichswoche aus dem Werktagstausch (Frühjahr/Herbst) im heutigen Plan.
-  // Der Wechsel liegt am Freitag der Ferienwoche (letzter Rhythmus-Wechselzeitpunkt vor Beginn der Ausgleichswoche).
-  const kandidaten = [];
-  for (const iv of basisIv) {
-    const m = /^Ausgleich (Frühjahr|Herbst)$/.exec(iv.grund ?? '');
-    if (!m || iv.vorlaeufig) continue;
-    const s = ref + Math.floor((iv.von - ref) / zyklus) * zyklus;
-    if (!moeglich(s) || kandidaten.some((k) => k.stichtag === Z.format(s))) continue;
-    const art = m[1] === 'Herbst' ? 'herbst' : 'fruehjahr';
-    kandidaten.push(bewerte(s, {
-      ferien: `${FERIEN_NAME[art]} ${Z.jahr(iv.von)}`,
-      bekommt: iv.bei, // erhält statt der Ausgleichswoche eine volle Woche ab Freitag
-      ausgleich: { von: Z.format(iv.von), bis: Z.format(iv.bis), bei: iv.bei },
-    }));
-  }
-  const vorschlaege = kandidaten.filter((k) => k.vorschlag)
-    .sort((a, b) => a.ziel.nachher.lang.length - b.ziel.nachher.lang.length || (a.stichtag < b.stichtag ? -1 : 1));
-
-  /** Frei gewählter Wechsel: erster Rhythmus-Wechselzeitpunkt ab `datum` (YYYY-MM-DD); null, wenn nicht möglich. */
-  const pruefe = (datum) => {
-    const t = Z.tag(Z.parse(datum));
-    const s = ref + Math.ceil((t - ref) / zyklus) * zyklus;
-    if (!moeglich(s)) return null;
-    return kandidaten.find((k) => k.stichtag === Z.format(s)) ?? bewerte(s, { eigen: true });
-  };
-
-  return { weihnachten, kandidaten, vorschlaege, pruefe };
-}
-
-return { TOLERANZ_NAECHTE, LANG_TAGE, bloecke, rhythmusAnalyse };
 };
 __f['ui/daten.js'] = function () {
 // Lädt alle Eingaben aus dem Dienst und berechnet daraus Plan, Rhythmus und Hilfsstrukturen für die Ansichten.
@@ -3915,7 +3937,8 @@ const { erstelleLocalStorageSpeicher } = __r('speicher/localstorage.js');
 const { DEV_KONTEN } = __r('speicher/inmemory.js');
 const { erstelleFirebaseSpeicher } = __r('speicher/firebase.js');
 const { FIREBASE_CONFIG, PAPA_EMAIL } = __r('data/firebase-config.js');
-const { erstelleMelder, neuesThema, ntfyNachricht, NTFY } = __r('app/benachrichtigung.js');
+const { rhythmusAnalyse } = __r('app/rhythmus.js');
+const { erstelleMelder,neuesThema, ntfyNachricht, NTFY } = __r('app/benachrichtigung.js');
 const { app, meldung, zeigeModal, schliesseModal, fange, modalFehler } = __r('ui/ctx.js');
 const { ladeDaten, betreuungsjahrZu } = __r('ui/daten.js');
 const { esc, NAME, download, datumDE } = __r('ui/util.js');
@@ -3974,7 +3997,24 @@ async function start() {
     ?? (lokal ? erstelleLocalStorageSpeicher() : await erstelleFirebaseSpeicher({ config: FIREBASE_CONFIG, papaEmail: PAPA_EMAIL }));
   await app.speicher.bereit?.();
   // Benachrichtigungen nur im echten Betrieb (nicht im lokalen Entwicklungsmodus)
-  const nachProtokoll = app.dev ? null : erstelleMelder({ speicher: app.speicher, melde: (t) => meldung(t, 'fehler') });
+  const GEMELDET_KEY = 'betreuungsplaner:rhythmus-gemeldet';
+  const nachProtokoll = app.dev ? null : erstelleMelder({
+    speicher: app.speicher, melde: (t) => meldung(t, 'fehler'),
+    gemeldet: {
+      lesen: () => { try { return JSON.parse(lies(GEMELDET_KEY) ?? '[]'); } catch { return []; } },
+      schreiben: (l) => schreibe(GEMELDET_KEY, JSON.stringify(l)),
+    },
+    vorschlaege: async () => {
+      const a = rhythmusAnalyse({
+        regeln: await app.dienst.regeln(), ferien: await app.dienst.ferien(),
+        antraege: await app.dienst.antraege(), jetzt: jetztFn(),
+      });
+      return a.vorschlaege.map((k) => ({
+        schluessel: k.stichtag,
+        text: `${k.ferien}: Rhythmuswechsel statt Ausgleichswoche${k.ziel ? `, Weihnachten ${k.ziel.jahr} ginge auf` : ''}`,
+      }));
+    },
+  });
   app.dienst = erstelleDienst({ speicher: app.speicher, jetzt: jetztFn, nachProtokoll });
   app.neuLaden = neuLaden;
   app.zeichne = zeichne;
