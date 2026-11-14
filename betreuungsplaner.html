@@ -263,7 +263,7 @@ label > .zeile { grid-template-columns: 1fr 6.5rem; }
 <div id="toast" role="status" hidden></div>
 <script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});</script>
 <noscript>Der Betreuungsplaner braucht JavaScript.</noscript>
-<!-- Build 14.11.2026 06:35 -->
+<!-- Build 14.11.2026 07:10 -->
 <script>
 const __m = {}; const __f = {};
 function __r(id) { if (!(id in __m)) __m[id] = __f[id](); return __m[id]; }
@@ -279,7 +279,13 @@ function parse(s) {
   const m = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?$/.exec(s);
   if (!m) throw new Error(`Ungültiger Zeitpunkt: ${s}`);
   const [, y, mo, d, h = '0', mi = '0'] = m;
-  return Date.UTC(+y, +mo - 1, +d, +h, +mi) / 60000;
+  const t = Date.UTC(+y, +mo - 1, +d, +h, +mi) / 60000;
+  // Date.UTC rollt ungültige Angaben (31.02., 25:00) stillschweigend weiter: ablehnen statt umdeuten
+  const k = new Date(t * 60000);
+  if (k.getUTCMonth() !== +mo - 1 || k.getUTCDate() !== +d || k.getUTCHours() !== +h || k.getUTCMinutes() !== +mi) {
+    throw new Error(`Ungültiger Zeitpunkt: ${s}`);
+  }
+  return t;
 }
 
 function format(t) {
@@ -816,6 +822,55 @@ const FERIEN_BAYERN = [
 
 return { FERIEN_BAYERN };
 };
+__f['app/serie.js'] = function () {
+// Regeltermine: ein gespeicherter Termin mit Wiederholung steht für viele Vorkommen.
+// wiederholung = { wochen: 1..8, bis: 'YYYY-MM-DD' } (gleicher Wochentag und gleiche Uhrzeit), ausfaelle = ['YYYY-MM-DD', …]
+// (einzeln abgesagte Vorkommen, Datum des Beginns). Reine Funktionen.
+
+const Z = __r('engine/zeit.js');
+
+const MAX_VORKOMMEN = 400;
+
+/** Alle Vorkommen eines Termins (auch ausgefallene, mit ausgefallen:true), jeweils als Termin mit eigenem von/bis. */
+function vorkommen(t) {
+  if (!t.wiederholung) return [t];
+  const von = Z.parse(t.von);
+  const dauer = Z.parse(t.bis) - von;
+  const letzter = Z.parse(t.wiederholung.bis);
+  const schritt = 7 * t.wiederholung.wochen * Z.MINUTEN_PRO_TAG;
+  const ausfaelle = new Set(t.ausfaelle ?? []);
+  const out = [];
+  for (let n = 0; n < MAX_VORKOMMEN; n++) {
+    const v = von + n * schritt;
+    if (Z.tag(v) > letzter) break;
+    const datum = Z.formatDatum(v);
+    out.push({ ...t, von: Z.format(v), bis: Z.format(v + dauer), datum, serie: true, ausgefallen: ausfaelle.has(datum) });
+  }
+  return out;
+}
+
+/** Aktive (nicht abgesagte, nicht ausgefallene) Vorkommen aller Termine. */
+function aktiveVorkommen(termine) {
+  return termine.filter((t) => t.status === 'aktiv').flatMap(vorkommen).filter((v) => !v.ausgefallen);
+}
+
+/** Nächstes noch nicht ausgefallenes Vorkommen ab dem Tag `ab` (Minutenwert), sonst null. */
+function naechstes(t, ab) {
+  return vorkommen(t).find((v) => !v.ausgefallen && Z.tag(Z.parse(v.bis)) >= Z.tag(ab)) ?? null;
+}
+
+const WT = ['Sonntag', 'Montag', 'Dienstag', 'Mittwoch', 'Donnerstag', 'Freitag', 'Samstag'];
+
+/** "jeden Dienstag" / "alle 2 Wochen dienstags, bis 30.06.2028" */
+function wiederholungText(t) {
+  if (!t.wiederholung) return '';
+  const w = WT[Z.wochentag(Z.parse(t.von))];
+  const bis = t.wiederholung.bis.split('-').reverse().join('.');
+  return t.wiederholung.wochen === 1 ? `jeden ${w}, bis ${bis}` : `alle ${t.wiederholung.wochen} Wochen (${w}), bis ${bis}`;
+}
+
+return { MAX_VORKOMMEN, vorkommen, aktiveVorkommen, naechstes, wiederholungText };
+};
 __f['app/dienst.js'] = function () {
 // Fachlogik: Anträge, Rechte, Ferientermine, Verlauf.
 // Arbeitet nur über die Speicher-Schnittstelle (src/speicher/schnittstelle.js) und die Regel-Engine.
@@ -824,6 +879,7 @@ const Z = __r('engine/zeit.js');
 const { berechnePlan, anderer, ELTERN, ersterSchultag } = __r('engine/engine.js');
 const { STANDARD_REGELN } = __r('data/standardregeln.js');
 const { FERIEN_BAYERN } = __r('data/ferien-bayern.js');
+const { vorkommen, MAX_VORKOMMEN } = __r('app/serie.js');
 
 class FachFehler extends Error {}
 
@@ -905,6 +961,29 @@ function ausgleichDifferenz(antrag) {
   const text = stunden === 0 ? 'Ausgleich gleich lang'
     : `Ausgleich ${zahl(stunden)} h ${stunden < 0 ? 'kürzer' : 'länger'}`;
   return { stunden, text };
+}
+
+/** Prüft einen Parameter-Patch gegen den Aufbau der geltenden Regeln (Schlüssel, Typ, Wertebereich). */
+function pruefeParameter(patch, basis, pfad = '') {
+  for (const [k, v] of Object.entries(patch)) {
+    const name = pfad ? `${pfad}.${k}` : k;
+    const alt = basis?.[k];
+    if (alt === undefined) throw new FachFehler(`Unbekannter Parameter: ${name}`);
+    if (istObjekt(alt)) {
+      if (!istObjekt(v)) throw new FachFehler(`Ungültiger Wert für ${name}`);
+      pruefeParameter(v, alt, name);
+    } else if (typeof alt === 'number') {
+      if (!Number.isInteger(v) || v < (k === 'zyklusTage' ? 1 : 0) || v > 366) throw new FachFehler(`${name}: bitte eine ganze Zahl ${k === 'zyklusTage' ? 'ab 1' : 'ab 0'} angeben`);
+    } else if (typeof v !== 'string') {
+      throw new FachFehler(`Ungültiger Wert für ${name}`);
+    } else if (ELTERN.includes(alt)) {
+      if (!ELTERN.includes(v)) throw new FachFehler(`${name}: Papa oder Mama angeben`);
+    } else if (/^\d{2}:\d{2}$/.test(alt)) {
+      if (!/^([01]\d|2[0-3]):(00|15|30|45)$/.test(v)) throw new FachFehler(`${name}: ${MELDUNG.RASTER}`);
+    } else {
+      zeitpunkt(v, name);
+    }
+  }
 }
 
 function zufallsId() {
@@ -1000,6 +1079,7 @@ function erstelleDienst({ speicher, jetzt = () => Z.ausDate(new Date()), neueId 
       for (const k of Object.keys(e.parameter)) {
         if (!(k in STANDARD_REGELN) || k === 'gueltigAb' || k === 'planbeginn') throw new FachFehler(`Unbekannter Parameter: ${k}`);
       }
+      pruefeParameter(e.parameter, versionen.at(-1));
       const ab = zeitpunkt(e.gueltigAb, 'Stichtag');
       if (ab <= jetzt()) throw new FachFehler(MELDUNG.STICHTAG);
       if (alle.some((a) => a.status === 'offen' && a.art === 'regelaenderung' && a.id !== ausser)) throw new FachFehler(MELDUNG.REGEL_OFFEN);
@@ -1115,9 +1195,11 @@ function erstelleDienst({ speicher, jetzt = () => Z.ausDate(new Date()), neueId 
 
       if (a.art === 'storno' || a.art === 'aenderung') {
         const ziel = await speicher.lesen('antraege', a.bezug.ausnahme);
-        if (!ziel || ziel.status !== 'bestaetigt') throw new FachFehler('Die betroffene Ausnahme ist nicht mehr gültig');
-        await setzeStatus(ziel, a.art === 'storno' ? 'storniert' : 'ersetzt', ich.kontoId, { entschieden: ziel.entschieden, entschiedenVon: ziel.entschiedenVon });
-        await protokoll(ich.kontoId, a.art === 'storno' ? 'ausnahme_storniert' : 'ausnahme_ersetzt', { bezug: ziel.id, alt: 'bestaetigt', neu: a.art === 'storno' ? 'storniert' : 'ersetzt' });
+        // abgeloestDurch macht die Bestätigung wiederholbar, falls die Verbindung zwischen den Schritten abbricht
+        const schonErledigt = ziel?.abgeloestDurch === a.id;
+        if (!ziel || (ziel.status !== 'bestaetigt' && !schonErledigt)) throw new FachFehler('Die betroffene Ausnahme ist nicht mehr gültig');
+        if (!schonErledigt) await setzeStatus(ziel, a.art === 'storno' ? 'storniert' : 'ersetzt', ich.kontoId, { entschieden: ziel.entschieden, entschiedenVon: ziel.entschiedenVon, abgeloestDurch: a.id });
+        if (!schonErledigt) await protokoll(ich.kontoId, a.art === 'storno' ? 'ausnahme_storniert' : 'ausnahme_ersetzt', { bezug: ziel.id, alt: 'bestaetigt', neu: a.art === 'storno' ? 'storniert' : 'ersetzt' });
       }
 
       if (a.art === 'regelaenderung') {
@@ -1204,10 +1286,37 @@ function erstelleDienst({ speicher, jetzt = () => Z.ausDate(new Date()), neueId 
         status: 'aktiv', version: (alt?.version ?? 0) + 1,
         erstelltVon: alt?.erstelltVon ?? ich.kontoId, erstellt: alt?.erstellt ?? jetztText(), geaendert: jetztText(),
       };
+      if (e.wiederholung) {
+        const wochen = e.wiederholung.wochen;
+        if (!Number.isInteger(wochen) || wochen < 1 || wochen > 8) throw new FachFehler('Wiederholung: alle 1 bis 8 Wochen');
+        let letzter;
+        try { letzter = Z.tag(Z.parse(String(e.wiederholung.bis))); } catch { throw new FachFehler('Wiederholung: bitte ein gültiges Enddatum angeben'); }
+        if (letzter < Z.tag(von)) throw new FachFehler('Wiederholung: Das Enddatum liegt vor dem ersten Termin');
+        if ((letzter - Z.tag(von)) / (7 * wochen * Z.MINUTEN_PRO_TAG) >= MAX_VORKOMMEN) throw new FachFehler(`Wiederholung: höchstens ${MAX_VORKOMMEN} Termine pro Serie`);
+        if (Z.tag(bis) - Z.tag(von) >= 7 * wochen * Z.MINUTEN_PRO_TAG) throw new FachFehler('Wiederholung: Ein Termin darf sich nicht mit dem nächsten überschneiden');
+        neu.wiederholung = { wochen, bis: Z.formatDatum(letzter) };
+        const gueltig = new Set(vorkommen(neu).map((v) => v.datum));
+        neu.ausfaelle = (alt?.ausfaelle ?? []).filter((x) => gueltig.has(x));
+      }
       await speicher.schreiben('termine', id, neu);
       if (alt) { const { id: _i, ...altOhneId } = alt; await protokoll(ich.kontoId, 'termin_geaendert', { bezug: id, alt: altOhneId, neu }); }
       else await protokoll(ich.kontoId, 'termin_angelegt', { bezug: id, neu });
       return { ...neu, id };
+    },
+
+    /** Sagt ein einzelnes Vorkommen eines Regeltermins ab (Datum = Tag des Beginns). */
+    async terminAusfall(id, datum) {
+      const ich = await angemeldet();
+      const t = await speicher.lesen('termine', id);
+      if (!t) throw new FachFehler('Termin nicht gefunden');
+      if (!t.wiederholung) throw new FachFehler('Das ist kein Regeltermin');
+      if (t.status === 'abgesagt') throw new FachFehler('Der Termin ist schon abgesagt');
+      const v = vorkommen(t).find((x) => x.datum === datum);
+      if (!v) throw new FachFehler('An diesem Tag gibt es keinen Termin der Serie');
+      if (v.ausgefallen) throw new FachFehler('Dieser Termin ist schon abgesagt');
+      const { id: _i, ...rest } = t;
+      await speicher.schreiben('termine', id, { ...rest, ausfaelle: [...(t.ausfaelle ?? []), datum].sort(), version: (t.version ?? 0) + 1, geaendert: jetztText() });
+      await protokoll(ich.kontoId, 'termin_ausgefallen', { bezug: id, alt: 'aktiv', neu: `abgesagt am ${datum}` });
     },
 
     async terminAbsagen(id) {
@@ -1521,8 +1630,18 @@ const SDK = 'https://www.gstatic.com/firebasejs/10.12.2/';
 const kodiere = (id) => encodeURIComponent(id); // Firestore-IDs dürfen kein "/" enthalten (z. B. "2027/28:herbst")
 const dekodiere = (id) => decodeURIComponent(id);
 
-async function erstelleFirebaseSpeicher({ config, papaEmail = '' }) {
-  const [{ initializeApp }, A, F] = await Promise.all([
+/**
+ * @param {object} o
+ * @param {object} o.config     Firebase-Konfiguration
+ * @param {string} [o.papaEmail]
+ * @param {Array}  [o.sdk]      [app, auth, firestore]-Module; nur für Tests (tests/fake-firebase.js)
+ * @param {() => boolean} [o.online]
+ */
+async function erstelleFirebaseSpeicher({
+  config, papaEmail = '', sdk = null,
+  online = () => typeof navigator === 'undefined' || navigator.onLine !== false,
+}) {
+  const [{ initializeApp }, A, F] = sdk ?? await Promise.all([
     import(SDK + 'firebase-app.js'),
     import(SDK + 'firebase-auth.js'),
     import(SDK + 'firebase-firestore.js'),
@@ -1548,7 +1667,30 @@ async function erstelleFirebaseSpeicher({ config, papaEmail = '' }) {
   };
   const sicher = async (f) => { try { return await f(); } catch (e) { throw fehler(e); } };
 
-  const lesen = (name, id) => sicher(async () => {
+  // Kurzlebiger Lese-Cache: Ein Seitenaufbau liest dieselben Dokumente mehrfach (Rollen, Anträge).
+  // Jeder Schreibvorgang und jeder Kontowechsel leert ihn.
+  let letzteZeit = 0;
+  const CACHE_MS = 4000;
+  const cache = new Map();
+  const gemerkt = (schluessel, f) => {
+    const c = cache.get(schluessel);
+    if (c && Date.now() - c.zeit < CACHE_MS) return c.wert.then(kopie);
+    const wert = sicher(f);
+    cache.set(schluessel, { zeit: Date.now(), wert });
+    wert.catch(() => cache.delete(schluessel));
+    return wert.then(kopie);
+  };
+  const schreibend = async (f) => {
+    // Ohne Netz würde Firestore den Schreibvorgang nur vormerken und nie antworten; mehrstufige Abläufe blieben halb fertig.
+    if (!online()) {
+      throw new SpeicherFehler('Keine Internetverbindung. Änderungen sind nur online möglich.');
+    }
+    cache.clear();
+    try { return await sicher(f); } finally { cache.clear(); }
+  };
+  A.onAuthStateChanged(auth, () => cache.clear());
+
+  const lesen = (name, id) => gemerkt(`d:${name}/${id}`, async () => {
     pruefeSammlung(name);
     const s = await F.getDoc(F.doc(db, name, kodiere(id)));
     return s.exists() ? { ...s.data(), id } : null;
@@ -1585,22 +1727,24 @@ async function erstelleFirebaseSpeicher({ config, papaEmail = '' }) {
       return { kontoId: u.uid, istBesitzer, email: u.email ?? null };
     },
     lesen,
-    liste: (name) => sicher(async () => {
+    liste: (name) => gemerkt(`l:${name}`, async () => {
       pruefeSammlung(name);
       const s = await F.getDocs(F.collection(db, name));
       const l = s.docs.map((d) => ({ ...d.data(), id: dekodiere(d.id) }));
       return name === 'verlauf' ? l.sort((a, b) => (a.id < b.id ? -1 : 1)) : l;
     }),
-    schreiben: (name, id, dok) => sicher(async () => {
+    schreiben: (name, id, dok) => schreibend(async () => {
       pruefeSchreiben(name);
       const { id: _i, ...rest } = dok;
       await F.setDoc(F.doc(db, name, kodiere(id)), kopie(rest));
     }),
-    anhaengen: (name, dok) => sicher(async () => {
+    anhaengen: (name, dok) => schreibend(async () => {
       pruefeAnhaengen(name);
       const { id: _i, ...rest } = dok;
       // Zeitbasierte ID: alphabetisch = zeitlich (Einfügereihenfolge)
-      const id = `v${String(Date.now()).padStart(14, '0')}-${Math.random().toString(36).slice(2, 7)}`;
+      // Streng aufsteigend, auch wenn zwei Einträge in dieselbe Millisekunde fallen
+      letzteZeit = Math.max(Date.now(), letzteZeit + 1);
+      const id = `v${String(letzteZeit).padStart(14, '0')}-${Math.random().toString(36).slice(2, 7)}`;
       await F.setDoc(F.doc(db, name, id), kopie(rest));
       return id;
     }),
@@ -1621,9 +1765,9 @@ const FIREBASE_CONFIG = {
   appId: '1:512101772770:web:168bf859371a42e1eeddbb',
 };
 
-// Google-Adresse von Papa. Nur dieses Konto kann den Plan einrichten.
-// Leer lassen = das erste angemeldete Konto richtet ein.
-const PAPA_EMAIL = 'sascharusche@gmail.com';
+// Bewusst leer: Diese Datei landet in der öffentlich abrufbaren Seite, E-Mail-Adressen gehören nicht hinein.
+// Wer den Plan einrichten und nutzen darf, legen allein die Regeln in firestore.rules fest (nur in der Firebase-Konsole).
+const PAPA_EMAIL = '';
 
 return { FIREBASE_CONFIG, PAPA_EMAIL };
 };
@@ -1991,6 +2135,7 @@ const Z = __r('engine/zeit.js');
 const { berechnePlan, ferienAbgedecktBis, betreuungsjahre, bilanz } = __r('engine/engine.js');
 const { kennzahlen, leereBilanz } = __r('engine/statistik.js');
 const { feiertage } = __r('ui/util.js');
+const { aktiveVorkommen } = __r('app/serie.js');
 
 async function ladeDaten(dienst, jetzt) {
   const ich = await dienst.ich();
@@ -2024,6 +2169,7 @@ function rechne(d) {
     d.wechselNachTag.get(k).push(u);
   }
 
+  d.vorkommen = aktiveVorkommen(d.termine);
   d.offen = d.antraege.filter((a) => a.status === 'offen');
   d.offenBereiche = [];
   for (const a of d.offen) {
@@ -2065,7 +2211,7 @@ function tagInfo(d, tag) {
     wechsel: d.wechselNachTag.get(tag) ?? [],
     ferien,
     feiertag: feiertage(Z.jahr(tag))[datum] ?? null,
-    termine: d.termine.filter((t) => t.status === 'aktiv' && Z.tag(Z.parse(t.von)) <= tag && tag <= Z.tag(Z.parse(t.bis))),
+    termine: d.vorkommen.filter((t) => Z.tag(Z.parse(t.von)) <= tag && tag <= Z.tag(Z.parse(t.bis))),
     offen: [...new Set(d.offenBereiche.filter((b) => b.von < ende && tag < b.bis).map((b) => b.id))],
   };
 }
@@ -2479,6 +2625,7 @@ const EREIGNIS_TEXT = {
   termin_angelegt: 'Termin angelegt',
   termin_geaendert: 'Termin geändert',
   termin_abgesagt: 'Termin abgesagt',
+  termin_ausgefallen: 'Einzelnen Termin der Serie abgesagt',
 };
 
 const ferienText = (f) => (f ? `${FERIEN_NAMEN[f.art] ?? f.art} ${f.schuljahr}: ${datumDE(f.erster)} bis ${datumDE(f.letzter)}${f.schulbeginn ? `, Schulbeginn ${datumDE(f.schulbeginn)}` : ''}` : '–');
@@ -2486,7 +2633,10 @@ const ferienText = (f) => (f ? `${FERIEN_NAMEN[f.art] ?? f.art} ${f.schuljahr}: 
 function verlaufText(d, v) {
   const a = d.antraege.find((x) => x.id === v.bezug);
   let detail = '';
-  if (v.ereignis.startsWith('termin_')) {
+  if (v.ereignis === 'termin_ausgefallen') {
+    const t = d.termine.find((x) => x.id === v.bezug);
+    detail = `${t?.titel ?? 'Termin'}: ${v.neu}`;
+  } else if (v.ereignis.startsWith('termin_')) {
     const t = d.termine.find((x) => x.id === v.bezug);
     const n = typeof v.neu === 'object' && v.neu ? v.neu : t;
     detail = n ? `${n.titel}, ${datumUhrDE(n.von)}${v.alt && typeof v.alt === 'object' && v.alt.von !== n.von ? ` (vorher ${datumUhrDE(v.alt.von)})` : ''}` : '';
@@ -2657,6 +2807,7 @@ __f['app/ics.js'] = function () {
 // Import in Google Kalender: Einstellungen > Importieren, oder Datei auf dem Handy öffnen.
 
 const Z = __r('engine/zeit.js');
+const { vorkommen } = __r('app/serie.js');
 
 const CRLF = '\r\n';
 const NAME = { papa: 'Papa', mama: 'Mama' };
@@ -2755,8 +2906,19 @@ function betreuungsIcs(bloecke, { stamp = new Date(), sequenz = 0 } = {}) {
 // ---------------------------------------------------------------------------
 // Termine von Lotte
 
+// Regeltermin: wöchentliche Wiederholung mit fester Anzahl (COUNT; ein UNTIL bräuchte UTC), Ausfälle als EXDATE.
+function serienZeilen(t) {
+  const alle = vorkommen(t);
+  const zeilen = [`RRULE:FREQ=WEEKLY;INTERVAL=${t.wiederholung.wochen};COUNT=${alle.length}`];
+  for (const v of alle.filter((x) => x.ausgefallen)) {
+    const s = Z.parse(v.von);
+    zeilen.push(t.ganztaegig ? `EXDATE;VALUE=DATE:${dtDatum(s)}` : `EXDATE;TZID=${TZ}:${dtLokal(s)}`);
+  }
+  return zeilen;
+}
+
 /**
- * @param {{id:string,titel:string,von:string,bis:string,ganztaegig?:boolean,ort?:string,notiz?:string,status?:string,version?:number}[]} termine
+ * @param {{id:string,titel:string,von:string,bis:string,ganztaegig?:boolean,ort?:string,notiz?:string,status?:string,version?:number,wiederholung?:{wochen:number,bis:string},ausfaelle?:string[]}[]} termine
  */
 function termineIcs(termine, { stamp = new Date() } = {}) {
   const st = dtStamp(stamp);
@@ -2773,6 +2935,7 @@ function termineIcs(termine, { stamp = new Date() } = {}) {
       `DTSTAMP:${st}`,
       `SEQUENCE:${t.version ?? 0}`,
       ...zeit,
+      ...(t.wiederholung ? serienZeilen(t) : []),
       `SUMMARY:${icsText(t.titel)}`,
       ...(t.ort ? [`LOCATION:${icsText(t.ort)}`] : []),
       ...(beschreibung ? [`DESCRIPTION:${icsText(beschreibung)}`] : []),
@@ -2786,10 +2949,11 @@ function termineIcs(termine, { stamp = new Date() } = {}) {
 return { mapsLink, icsText, falte, betreuungsBloecke, betreuungsIcs, termineIcs };
 };
 __f['ui/termine.js'] = function () {
-// Termine von Lotte: Liste, Kartenlink und Kalenderexport.
+// Termine von Lotte: Liste, Kartenlink und Kalenderexport. Regeltermine erscheinen als eine Karte mit dem nächsten Vorkommen.
 
 const Z = __r('engine/zeit.js');
 const { mapsLink } = __r('app/ics.js');
+const { naechstes, vorkommen, wiederholungText } = __r('app/serie.js');
 const { esc, wtDatumUhr, datumDE, wt } = __r('ui/util.js');
 
 function zeitText(t) {
@@ -2800,26 +2964,37 @@ function zeitText(t) {
   return gleicherTag ? `${wtDatumUhr(t.von)} – ${t.bis.slice(11)} Uhr` : `${wtDatumUhr(t.von)} – ${wtDatumUhr(t.bis)}`;
 }
 
-function karte(t) {
+/** t = Termin, z = anzuzeigendes Vorkommen (bei Einzeltermin derselbe). */
+function karte(t, z = t) {
   const abgesagt = t.status === 'abgesagt';
+  const serie = !!t.wiederholung;
   return `<article class="karte termin${abgesagt ? ' abgesagt' : ''}">
-    <header><h3>${esc(t.titel)}</h3>${abgesagt ? '<span class="status st-abgelehnt">abgesagt</span>' : ''}</header>
-    <p>${esc(zeitText(t))}</p>
+    <header><h3>${esc(t.titel)}</h3>${abgesagt ? '<span class="status st-abgelehnt">abgesagt</span>' : ''}${serie ? '<span class="status">Regeltermin</span>' : ''}</header>
+    <p>${serie ? 'Nächster: ' : ''}${esc(zeitText(z))}</p>
+    ${serie ? `<p class="klein">${esc(wiederholungText(t))}${t.ausfaelle?.length ? ` · ${t.ausfaelle.length} abgesagt` : ''}</p>` : ''}
     ${t.ort ? `<p>${esc(t.ort)} · <a href="${esc(mapsLink(t.ort))}" target="_blank" rel="noopener noreferrer">Karte öffnen</a></p>` : ''}
     ${t.notiz ? `<p class="klein">${esc(t.notiz)}</p>` : ''}
-    ${abgesagt ? '' : `<div class="aktionen"><button class="knopf" data-act="terminDialog" data-id="${esc(t.id)}">Ändern</button><button class="knopf" data-act="terminAbsagenDialog" data-id="${esc(t.id)}">Absagen …</button></div>`}
+    ${abgesagt ? '' : `<div class="aktionen"><button class="knopf" data-act="terminDialog" data-id="${esc(t.id)}">${serie ? 'Serie ändern' : 'Ändern'}</button><button class="knopf" data-act="terminAbsagenDialog" data-id="${esc(t.id)}" data-datum="${esc(z.datum ?? '')}">Absagen …</button></div>`}
   </article>`;
 }
 
 function termineSeite(d) {
   const heute = Z.tag(d.jetzt);
-  const sortiert = [...d.termine].sort((a, b) => (a.von < b.von ? -1 : 1));
-  const anstehend = sortiert.filter((t) => Z.tag(Z.parse(t.bis)) >= heute);
-  const vergangen = sortiert.filter((t) => Z.tag(Z.parse(t.bis)) < heute).reverse();
+  const anstehend = [];
+  const vergangen = [];
+  for (const t of d.termine) {
+    const n = t.wiederholung && t.status === 'aktiv' ? naechstes(t, heute) : null;
+    const letzte = t.wiederholung ? vorkommen(t).at(-1) : t;
+    if (n) anstehend.push([t, n]);
+    else if (Z.tag(Z.parse(letzte.bis)) >= heute && !t.wiederholung) anstehend.push([t, t]);
+    else vergangen.push([t, letzte]);
+  }
+  anstehend.sort((a, b) => (a[1].von < b[1].von ? -1 : 1));
+  vergangen.sort((a, b) => (a[1].von < b[1].von ? 1 : -1));
   return `<div class="kopfzeile"><h2>Termine Lotte</h2><button class="knopf primaer" data-act="terminDialog">Neu</button></div>
-    <p class="klein">Arzt, Schule, Verein: für beide sichtbar, ohne Bestätigung. Mit Ort wird ein Google-Maps-Link erzeugt. <a href="#/export">Als Kalenderdatei exportieren</a></p>
-    ${anstehend.length ? anstehend.map(karte).join('') : '<p class="leer">Keine anstehenden Termine.</p>'}
-    ${vergangen.length ? `<details class="aufklapp"><summary>Vergangen (${vergangen.length})</summary>${vergangen.map(karte).join('')}</details>` : ''}`;
+    <p class="klein">Arzt, Schule, Verein: für beide sichtbar, ohne Bestätigung. Auch als Regeltermin (z. B. jeden Dienstag Training). Mit Ort wird ein Google-Maps-Link erzeugt. <a href="#/export">Als Kalenderdatei exportieren</a></p>
+    ${anstehend.length ? anstehend.map(([t, z]) => karte(t, z)).join('') : '<p class="leer">Keine anstehenden Termine.</p>'}
+    ${vergangen.length ? `<details class="aufklapp"><summary>Vergangen (${vergangen.length})</summary>${vergangen.map(([t, z]) => karte(t, z)).join('')}</details>` : ''}`;
 }
 
 return { termineSeite };
@@ -2896,6 +3071,7 @@ __f['ui/formulare.js'] = function () {
 const Z = __r('engine/zeit.js');
 const { ersterSchultag, anderer } = __r('engine/engine.js');
 const { ausgleichDifferenz, FERIENARTEN } = __r('app/dienst.js');
+const { wiederholungText } = __r('app/serie.js');
 const {
   app, zeigeModal, schliesseModal, modalBox, modalFehler, felder, fange, meldung, ZEITEN,
 } = __r('ui/ctx.js');
@@ -2944,6 +3120,9 @@ function antragFormular(p = {}) {
     const heute = Z.formatDatum(Z.tag(Math.max(d.jetzt, d.planVon)));
     f.vd = heute;
     f.bd = zuTag(heute, 1);
+    // Vorbelegung: der Elternteil, bei dem Lotte in diesem Zeitraum laut Plan gerade nicht ist
+    const iv = ivAt(d, Z.parse(`${heute}T15:00`));
+    if (iv) f.bei = anderer(iv.bei);
   }
   if (p.antrag) {
     const a = p.antrag;
@@ -2952,7 +3131,12 @@ function antragFormular(p = {}) {
     });
     if (a.ausgleich) Object.assign(f, { ausgleichAn: true, avd: a.ausgleich.von.slice(0, 10), avt: uhr(a.ausgleich.von), abd: a.ausgleich.bis.slice(0, 10), abt: uhr(a.ausgleich.bis) });
     if (modus === 'aenderung') { f.bezugId = a.id; f.art = a.art; }
-    if (modus === 'gegen') { f.gegenId = a.id; f.art = a.art === 'weihnachtsbesuch' ? 'weihnachtsbesuch' : 'ausnahme'; }
+    if (modus === 'gegen') {
+      f.gegenId = a.id;
+      f.art = a.art === 'weihnachtsbesuch' ? 'weihnachtsbesuch' : 'ausnahme';
+      // Gegenvorschlag zu einer Änderung bleibt eine Änderung derselben Ausnahme
+      if (a.art === 'aenderung') f.bezugId = a.bezug.ausnahme;
+    }
   }
   F = f;
   zeichneFormular();
@@ -2960,7 +3144,7 @@ function antragFormular(p = {}) {
 
 function eingabeAusForm() {
   const f = F;
-  const art = f.modus === 'aenderung' ? 'aenderung'
+  const art = f.modus === 'aenderung' || (f.modus === 'gegen' && f.bezugId) ? 'aenderung'
     : f.art === 'weihnachtsbesuch' ? 'weihnachtsbesuch'
       : f.ausgleichAn ? 'ausnahme_mit_ausgleich' : 'ausnahme';
   const e = { art, von: `${f.vd}T${f.vt}`, bis: `${f.bd}T${f.bt}`, bei: f.bei, begruendung: f.begruendung };
@@ -3000,7 +3184,7 @@ function weihnachtsVorbelegung() {
 function zeichneFormular() {
   const f = F;
   const gegen = f.modus === 'gegen';
-  const aend = f.modus === 'aenderung';
+  const aend = f.modus === 'aenderung' || (gegen && !!f.bezugId);
   const titel = gegen ? 'Gegenvorschlag' : aend ? 'Ausnahme ändern' : 'Abweichung beantragen';
   if (f.schritt === 2) {
     const v = f.vorschau;
@@ -3011,6 +3195,7 @@ function zeichneFormular() {
       <p><b>${esc(wtDatumUhr(e.von))} – ${esc(wtDatumUhr(e.bis))}</b><br>Lotte bei ${NAME[e.bei]}${e.ausgleich ? `<br>Ausgleich: ${esc(wtDatumUhr(e.ausgleich.von))} – ${esc(wtDatumUhr(e.ausgleich.bis))} bei ${NAME[anderer(e.bei)]}<br><b>${esc(diffText())}</b>` : ''}</p>
       <h3>Entfallende Übergaben</h3>${liste(v.entfallen, 'Keine')}
       <h3>Neue Übergaben</h3>${liste(v.neu, 'Keine')}
+      ${!v.entfallen.length && !v.neu.length ? '<p class="hinweis warn"><b>Dieser Antrag ändert den Plan nicht.</b> Lotte ist in diesem Zeitraum ohnehin beim gewählten Elternteil. Bitte Zeitraum und Elternteil prüfen.</p>' : ''}
       ${v.nachtraeglich ? '<p class="hinweis warn">Der Zeitraum hat schon begonnen: Der Antrag wird als <b>nachträglich</b> markiert und verfällt nicht.</p>' : ''}
       <p class="klein">${gegen ? 'Der Gegenvorschlag ersetzt den abgelehnten Antrag.' : 'Der Antrag wirkt erst, wenn'} ${gegen ? '' : `${andere} ihn bestätigt hat.`}</p>
       <div class="aktionen"><button class="knopf" data-act="formZurueck">Zurück</button><button class="knopf primaer" data-act="formSenden">${gegen ? 'Gegenvorschlag senden' : 'Antrag senden'}</button></div>`);
@@ -3097,7 +3282,7 @@ function ablehnenDialog(id) {
     <p class="klein">${esc(ARTEN_TEXT[a.art])}</p>
     <label>Kommentar (Pflicht)<textarea data-f="kommentar" rows="3"></textarea></label>
     <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button>
-    ${a.art === 'regelaenderung' ? '' : `<button class="knopf" data-act="gegenvorschlagStart" data-id="${id}">Gegenvorschlag …</button>`}
+    ${a.art === 'regelaenderung' || a.art === 'storno' ? '' : `<button class="knopf" data-act="gegenvorschlagStart" data-id="${id}">Gegenvorschlag …</button>`}
     <button class="knopf primaer" data-act="ablehnenSenden" data-id="${id}">Ablehnen</button></div>`);
 }
 
@@ -3261,6 +3446,11 @@ function terminForm() {
       <div class="zeile"><span>Von</span>${datumFeld('vd', t.vd)}${zeit('vt', t.vt)}</div>
       <div class="zeile"><span>Bis</span>${datumFeld('bd', t.bd)}${zeit('bt', t.bt)}</div>
     </fieldset>
+    <label class="check"><input type="checkbox" data-f="rep" data-change="terminGanz"${t.rep ? ' checked' : ''}> Regeltermin (wiederholt sich wöchentlich, am selben Wochentag)</label>
+    ${t.rep ? `<fieldset><legend>Wiederholung</legend>
+      <div class="zeile"><span>Alle</span><select data-f="wochen" aria-label="Wochenabstand">${[1, 2, 3, 4, 6, 8].map((n) => `<option value="${n}"${String(t.wochen) === String(n) ? ' selected' : ''}>${n === 1 ? 'Woche' : `${n} Wochen`}</option>`).join('')}</select></div>
+      <div class="zeile"><span>Bis</span>${datumFeld('rbis', t.rbis)}</div>
+      <p class="klein">Beim Ändern gilt die Änderung für die ganze Serie. Einzelne Termine lassen sich unter „Absagen“ ausfallen lassen.</p></fieldset>` : ''}
     <label>Ort (wird als Google-Maps-Link in den Kalender übernommen)<input data-f="ort" value="${esc(t.ort)}" autocomplete="off" placeholder="Straße, Ort"></label>
     <label>Notiz<textarea data-f="notiz" rows="2">${esc(t.notiz)}</textarea></label>
     <p class="klein">Termine brauchen keine Bestätigung und ändern die Betreuung nicht. Änderungen stehen im Verlauf.</p>
@@ -3271,10 +3461,15 @@ function terminDialog({ id = null, tag = null } = {}) {
   const alt = id ? app.d.termine.find((x) => x.id === id) : null;
   const heute = Z.formatDatum(Z.tag(Math.max(app.d.jetzt, app.d.planVon)));
   T = alt
-    ? { id, titel: alt.titel, ganztaegig: alt.ganztaegig, vd: alt.von.slice(0, 10), vt: uhr(alt.von), bd: alt.bis.slice(0, 10), bt: uhr(alt.bis), ort: alt.ort, notiz: alt.notiz }
-    : { id: null, titel: '', ganztaegig: false, vd: tag ?? heute, vt: '15:00', bd: tag ?? heute, bt: '16:00', ort: '', notiz: '' };
+    ? {
+      id, titel: alt.titel, ganztaegig: alt.ganztaegig, vd: alt.von.slice(0, 10), vt: uhr(alt.von), bd: alt.bis.slice(0, 10), bt: uhr(alt.bis), ort: alt.ort, notiz: alt.notiz,
+      rep: !!alt.wiederholung, wochen: alt.wiederholung?.wochen ?? 1, rbis: alt.wiederholung?.bis ?? halbjahr(alt.von.slice(0, 10)),
+    }
+    : { id: null, titel: '', ganztaegig: false, vd: tag ?? heute, vt: '15:00', bd: tag ?? heute, bt: '16:00', ort: '', notiz: '', rep: false, wochen: 1, rbis: halbjahr(tag ?? heute) };
   terminForm();
 }
+
+const halbjahr = (datum) => Z.formatDatum(Z.plusTage(Z.parse(datum), 26 * 7));
 
 const terminAktionen = {
   terminGanz() {
@@ -3286,6 +3481,7 @@ const terminAktionen = {
     const ok = await fange(() => app.dienst.terminSpeichern({
       id: T.id, titel: v.titel, ganztaegig: v.ganztaegig,
       von: `${v.vd}T${v.vt ?? '00:00'}`, bis: `${v.bd}T${v.bt ?? '00:00'}`, ort: v.ort, notiz: v.notiz,
+      wiederholung: v.rep ? { wochen: Number(v.wochen), bis: v.rbis } : null,
     }), { imModal: true });
     if (!ok) return;
     schliesseModal();
@@ -3294,11 +3490,27 @@ const terminAktionen = {
   },
 };
 
-function terminAbsagenDialog(id) {
+function terminAbsagenDialog(id, datum = '') {
   const t = app.d.termine.find((x) => x.id === id);
+  if (t.wiederholung) {
+    zeigeModal(`<h2>Regeltermin absagen?</h2>${meldeZeile}<p><b>${esc(t.titel)}</b><br>${esc(wiederholungText(t))}</p>
+      <p class="klein">Nur den nächsten Termin ausfallen lassen oder die ganze Serie beenden. Beides bleibt sichtbar und steht im Verlauf; gelöscht wird nichts.</p>
+      <div class="aktionen"><button class="knopf" data-act="modalZu">Behalten</button>
+      ${datum ? `<button class="knopf" data-act="terminAusfallJa" data-id="${esc(id)}" data-datum="${esc(datum)}">Nur am ${esc(datumDE(datum))}</button>` : ''}
+      <button class="knopf primaer" data-act="terminAbsagenJa" data-id="${esc(id)}">Ganze Serie</button></div>`);
+    return;
+  }
   zeigeModal(`<h2>Termin absagen?</h2><p><b>${esc(t.titel)}</b><br>${esc(wtDatumUhr(t.von))}</p>
     <p class="klein">Der Termin bleibt sichtbar und wird als abgesagt markiert (im Kalenderexport als abgesagt). Gelöscht wird nichts.</p>
     <div class="aktionen"><button class="knopf" data-act="modalZu">Behalten</button><button class="knopf primaer" data-act="terminAbsagenJa" data-id="${esc(id)}">Absagen</button></div>`);
+}
+
+async function terminAusfallJa(el) {
+  const ok = await fange(() => app.dienst.terminAusfall(el.dataset.id, el.dataset.datum), { imModal: true });
+  if (!ok) return;
+  schliesseModal();
+  await app.neuLaden();
+  meldung('Dieser Termin fällt aus', 'ok');
 }
 
 async function terminAbsagenJa(el) {
@@ -3309,7 +3521,7 @@ async function terminAbsagenJa(el) {
   meldung('Termin abgesagt', 'ok');
 }
 
-return { antragFormular, formAktionen, ablehnenDialog, ablehnenAktionen, stornoDialog, stornoSenden, regelDialog, regelAktionen, ferienDialog, ferienSenden, tagDialog, tagAntrag, terminDialog, terminAktionen, terminAbsagenDialog, terminAbsagenJa };
+return { antragFormular, formAktionen, ablehnenDialog, ablehnenAktionen, stornoDialog, stornoSenden, regelDialog, regelAktionen, ferienDialog, ferienSenden, tagDialog, tagAntrag, terminDialog, terminAktionen, terminAbsagenDialog, terminAusfallJa, terminAbsagenJa };
 };
 __f['ui/app.js'] = function () {
 // Einstieg: Start, Router, Navigation, Aktionen, Export/Import.
@@ -3335,7 +3547,7 @@ const { druckMonat, druckJahr, druckVerlauf } = __r('ui/druck.js');
 const {
   antragFormular, formAktionen, ablehnenDialog, ablehnenAktionen, stornoDialog, stornoSenden,
   regelDialog, regelAktionen, ferienDialog, ferienSenden, tagDialog, tagAntrag,
-  terminDialog, terminAktionen, terminAbsagenDialog, terminAbsagenJa,
+  terminDialog, terminAktionen, terminAbsagenDialog, terminAbsagenJa, terminAusfallJa,
 } = __r('ui/formulare.js');
 
 const ROLLE_KEY = 'betreuungsplaner:dev-rolle';
@@ -3347,7 +3559,7 @@ const schreibe = (k, v) => { try { if (v === null) localStorage.removeItem(k); e
 // Start
 
 function jetztFn() {
-  const p = new URLSearchParams(location.search).get('jetzt'); // nur Entwicklung: ?jetzt=2027-06-01T12:00
+  const p = app.dev ? new URLSearchParams(location.search).get('jetzt') : null; // nur Entwicklung: ?jetzt=2027-06-01T12:00
   if (p) {
     try { return Z.parse(p); } catch { /* ignorieren */ }
   }
@@ -3393,6 +3605,14 @@ async function start() {
   document.addEventListener('click', klick);
   document.addEventListener('change', aenderung);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') schliesseModal(); });
+  // Zurück im Vordergrund (z. B. installierte App wieder geöffnet): Daten des anderen Elternteils nachladen.
+  let zuletztGeladen = Date.now();
+  document.addEventListener('visibilitychange', async () => {
+    if (document.visibilityState !== 'visible' || !document.getElementById('modal').hidden) return;
+    if (Date.now() - zuletztGeladen < 30000) return;
+    zuletztGeladen = Date.now();
+    await neuLaden();
+  });
   await neuLaden();
 }
 
@@ -3474,13 +3694,33 @@ function fehlerSeite() {
     ${einrichten ? `<p>Du bist als Besitzer angemeldet. Mama wird automatisch verbunden, sobald sie den Plan zum ersten Mal öffnet.</p>
       <div class="aktionen"><button class="knopf primaer" data-act="einrichten">Plan einrichten</button></div>` : ''}
     ${app.fehler === MELDUNG.NICHT_ANGEMELDET && app.speicher.anmelden ? '<div class="aktionen"><button class="knopf primaer" data-act="anmelden">Mit Google anmelden</button></div>' : ''}
-    ${app.fehler === MELDUNG.KEINE_BERECHTIGUNG && app.speicher.abmelden ? `<p class="klein">Angemeldet als ${esc(app.speicher.email?.() ?? '')}.</p><div class="aktionen"><button class="knopf" data-act="abmelden">Anderes Konto verwenden</button></div>` : ''}
+    ${app.speicher.abmelden && app.speicher.email?.() ? `<p class="klein">Angemeldet als ${esc(app.speicher.email())}.</p><div class="aktionen"><button class="knopf" data-act="neuLaden">Erneut versuchen</button><button class="knopf" data-act="abmelden">Anderes Konto verwenden</button></div>` : ''}
     <p class="klein">Ohne Anmeldung oder ohne Datenbankzugriff kann der Plan nicht angezeigt werden.</p></div></main>`;
+}
+
+// App-Installation: Chrome/Edge liefern ein Ereignis, das wir für einen eigenen Knopf aufheben; iPhone/Safari kennt es nicht.
+let installEreignis = null;
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installEreignis = e; if (location.hash.startsWith('#/mehr')) zeichne(); });
+  window.addEventListener('appinstalled', () => { installEreignis = null; if (app.d) zeichne(); });
+}
+
+function installKarte() {
+  const eigen = typeof matchMedia === 'function' && (matchMedia('(display-mode: standalone)').matches || navigator.standalone === true);
+  if (eigen) return '';
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const text = installEreignis
+    ? 'Der Plan lässt sich wie eine App auf dem Startbildschirm ablegen und startet ohne Browserleiste.'
+    : ios
+      ? 'Safari: unten auf Teilen (Quadrat mit Pfeil) tippen, dann „Zum Home-Bildschirm“. Das geht nur in Safari, nicht in anderen Browsern.'
+      : 'Chrome: oben rechts Menü ⋮ öffnen, dann „App installieren“ oder „Zum Startbildschirm hinzufügen“. Erscheint der Eintrag nicht, die Seite einmal neu laden und in Chrome (nicht in einer Vorschau oder App-Ansicht) öffnen.';
+  return `<div class="karte"><h3>Als App installieren</h3><p class="klein">${text}</p>
+    ${installEreignis ? '<div class="aktionen"><button class="knopf primaer" data-act="appInstallieren">App installieren</button></div>' : ''}</div>`;
 }
 
 function mehrSeite(d) {
   const theme = document.documentElement.dataset.theme ?? '';
-  return `<h2>Mehr</h2>
+  return `<h2>Mehr</h2>${installKarte()}
     <ul class="menue">
       <li><a href="#/termine"><span class="sym" aria-hidden="true">📅</span>Termine Lotte</a></li>
       <li><a href="#/uebergaben"><span class="sym" aria-hidden="true">🔁</span>Übergaben</a></li>
@@ -3531,8 +3771,16 @@ const aktionen = {
   ...regelAktionen,
   ...terminAktionen,
   terminDialog: (el) => terminDialog({ id: el.dataset.id || null }),
-  terminAbsagenDialog: (el) => terminAbsagenDialog(el.dataset.id),
+  terminAbsagenDialog: (el) => terminAbsagenDialog(el.dataset.id, el.dataset.datum),
   terminAbsagenJa,
+  terminAusfallJa,
+  async appInstallieren() {
+    if (!installEreignis) return;
+    const e = installEreignis;
+    installEreignis = null;
+    await e.prompt();
+    zeichne();
+  },
   tagTermin: (el) => { schliesseModal(); terminDialog({ tag: el.dataset.tag }); },
   tag: (el) => tagDialog(el.dataset.tag),
   tagAntrag,
@@ -3571,6 +3819,7 @@ const aktionen = {
       <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button><button class="knopf primaer" data-act="zuruecksetzenJa">Ja, zurücksetzen</button></div>`);
   },
   zuruecksetzenJa() { app.speicher.zuruecksetzen(); location.hash = '#/start'; location.reload(); },
+  neuLaden: () => neuLaden(),
   async anmelden() { await app.speicher.anmelden(); await neuLaden(); },
   async abmelden() { await app.speicher.abmelden(); await neuLaden(); },
   async einrichten() {

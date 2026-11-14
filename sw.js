@@ -12,7 +12,7 @@ self.addEventListener('fetch', (e) => {
   const sdk = u.hostname === 'www.gstatic.com' && u.pathname.startsWith('/firebasejs/');
   if (e.request.method !== 'GET' || !(eigene || sdk)) return; // Firestore/Anmeldung laufen am Worker vorbei
   e.respondWith(
-    fetch(e.request).then((r) => {
+    fetch(e.request, eigene ? { cache: 'no-cache' } : undefined).then((r) => {
       if (r.ok) { const k = r.clone(); caches.open(CACHE).then((c) => c.put(e.request, k)); }
       return r;
     }).catch(() => caches.match(e.request).then((r) => r || caches.match('./'))),
