@@ -263,7 +263,7 @@ label > .zeile { grid-template-columns: 1fr 6.5rem; }
 <div id="toast" role="status" hidden></div>
 <script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});</script>
 <noscript>Der Betreuungsplaner braucht JavaScript.</noscript>
-<!-- Build 14.11.2026 08:01 -->
+<!-- Build 14.11.2026 10:02 -->
 <script>
 const __m = {}; const __f = {};
 function __r(id) { if (!(id in __m)) __m[id] = __f[id](); return __m[id]; }
@@ -1304,6 +1304,22 @@ function erstelleDienst({ speicher, jetzt = () => Z.ausDate(new Date()), neueId 
       return { ...neu, id };
     },
 
+    // ---- Benachrichtigungen: eigene Geräte-Tokens und Mail-Schalter (Dokument geraete/<Konto-ID>) ----
+    async geraete() {
+      const ich = await angemeldet();
+      return (await speicher.lesen('geraete', ich.kontoId)) ?? { tokens: [], mail: true };
+    },
+    async geraeteSpeichern({ token = null, mail = null, tokenEntfernen = null }) {
+      const ich = await angemeldet();
+      const alt = (await speicher.lesen('geraete', ich.kontoId)) ?? { tokens: [], mail: true };
+      let tokens = alt.tokens ?? [];
+      if (token) tokens = [token, ...tokens.filter((t) => t !== token)].slice(0, 5);
+      if (tokenEntfernen) tokens = tokens.filter((t) => t !== tokenEntfernen);
+      const neu = { tokens, mail: mail ?? alt.mail ?? true };
+      await speicher.schreiben('geraete', ich.kontoId, neu);
+      return neu;
+    },
+
     /** Sagt ein einzelnes Vorkommen eines Regeltermins ab (Datum = Tag des Beginns). */
     async terminAusfall(id, datum) {
       const ich = await angemeldet();
@@ -1470,7 +1486,7 @@ __f['speicher/schnittstelle.js'] = function () {
 // Es gibt bewusst keine Lösch-Methode: Nichts Bestätigtes verschwindet, der Verlauf ist unveränderlich.
 // Jedes Dokument wird mit seiner id gespeichert und mit Feld "id" zurückgegeben.
 
-const SAMMLUNGEN = ['config', 'regeln', 'ferien', 'antraege', 'verlauf', 'termine'];
+const SAMMLUNGEN = ['config', 'regeln', 'ferien', 'antraege', 'verlauf', 'termine', 'geraete'];
 const NUR_ANHAENGEN = new Set(['verlauf']);
 
 class SpeicherFehler extends Error {}
@@ -1718,6 +1734,23 @@ async function erstelleFirebaseSpeicher({
       }
     },
     async abmelden() { await A.signOut(auth); },
+    /** Fragt die Erlaubnis für Benachrichtigungen ab und liefert das Geräte-Token (nur im Browser, nicht in Tests ohne sdk). */
+    async pushToken(vapidKey) {
+      if (typeof Notification === 'undefined' || !('serviceWorker' in navigator)) {
+        throw new SpeicherFehler('Dieses Gerät kann hier keine Benachrichtigungen empfangen. iPhone: die App zuerst über Safari zum Home-Bildschirm hinzufügen.');
+      }
+      if ((await Notification.requestPermission()) !== 'granted') {
+        throw new SpeicherFehler('Benachrichtigungen sind blockiert. In den Einstellungen des Geräts oder Browsers für diese Seite erlauben.');
+      }
+      const M = await import(SDK + 'firebase-messaging.js');
+      if (!(await M.isSupported())) throw new SpeicherFehler('Dieser Browser unterstützt keine Push-Nachrichten.');
+      const reg = await navigator.serviceWorker.ready;
+      try {
+        return await M.getToken(M.getMessaging(fbApp), { vapidKey, serviceWorkerRegistration: reg });
+      } catch (e) {
+        throw new SpeicherFehler(`Benachrichtigungen konnten nicht aktiviert werden (${e?.code ?? e?.message})`);
+      }
+    },
     /** Ruft f auf, sobald (auch verspätet) ein Konto angemeldet ist. */
     beiAnmeldung(f) { return A.onAuthStateChanged(auth, (u) => { if (u) f(); }); },
 
@@ -1771,11 +1804,15 @@ const FIREBASE_CONFIG = {
   appId: '1:512101772770:web:168bf859371a42e1eeddbb',
 };
 
+// Öffentlicher Web-Push-Schlüssel (Firebase-Konsole > Projekteinstellungen > Cloud Messaging > Web-Push-Zertifikate).
+// Er ist kein Geheimnis. Leer = Push-Knopf in der App ist aus. Anleitung: docs/benachrichtigungen.md
+const VAPID_KEY = '';
+
 // Bewusst leer: Diese Datei landet in der öffentlich abrufbaren Seite, E-Mail-Adressen gehören nicht hinein.
 // Wer den Plan einrichten und nutzen darf, legen allein die Regeln in firestore.rules fest (nur in der Firebase-Konsole).
 const PAPA_EMAIL = '';
 
-return { FIREBASE_CONFIG, PAPA_EMAIL };
+return { FIREBASE_CONFIG, VAPID_KEY, PAPA_EMAIL };
 };
 __f['ui/ctx.js'] = function () {
 // Gemeinsamer Anwendungszustand und kleine DOM-Helfer (Modal, Meldungen).
@@ -2134,6 +2171,143 @@ function download(dateiname, inhalt, typ) {
 
 return { NAME, MONATE, ARTEN_TEXT, STATUS_TEXT, esc, wt, wtLang, datumDE, kurzDatumDE, uhr, datumUhrDE, wtDatumUhr, monatsname, zahl, mitVorzeichen, prozent, saldoText, ostersonntag, feiertage, monatsTage, download };
 };
+__f['app/rhythmus.js'] = function () {
+// Rhythmus-Assistent: prüft, ob ein einmaliger Rhythmuswechsel (Phasenverschiebung um einen Abschnitt, also
+// "Lotte bleibt eine Woche länger, danach läuft der Rhythmus andersherum") den Plan verbessert.
+// Technisch ist das eine normale Regeländerung von rhythmus.referenzBei mit Stichtag; hier wird sie nur durchgerechnet und bewertet.
+// Reine Funktionen, keine Speicherzugriffe.
+
+const Z = __r('engine/zeit.js');
+const { berechnePlan, betreuungsjahre, bilanz, anderer, ersterSchultag, ferienAbgedecktBis } = __r('engine/engine.js');
+
+/** Zulässige Abweichung der Nächte vom Mittel je Betreuungsjahr ("184 ± 2" bei 364 Nächten), mindestens der heutige Stand. */
+const TOLERANZ_NAECHTE = 2;
+/** Ein Block ab dieser Länge am Stück beim selben Elternteil gilt als "Doppelwoche". */
+const LANG_TAGE = 10;
+
+const TAG = Z.MINUTEN_PRO_TAG;
+
+function schulbeginnTag(f) {
+  return f.schulbeginn ? Z.tag(Z.parse(f.schulbeginn)) : ersterSchultag(f.letzter);
+}
+
+/** Zusammenhängende Betreuungsblöcke (gleicher Elternteil lückenlos), nur nach `ab`. */
+function bloecke(intervalle, ab = -Infinity) {
+  const out = [];
+  for (const iv of intervalle) {
+    if (iv.vorlaeufig) continue;
+    const l = out.at(-1);
+    if (l && l.bei === iv.bei && l.bis === iv.von) l.bis = iv.bis;
+    else out.push({ von: iv.von, bis: iv.bis, bei: iv.bei });
+  }
+  return out.filter((b) => b.bis > ab);
+}
+
+/** Kennzahlen eines Plans: Nächte je Betreuungsjahr und lange Blöcke ab `ab`. */
+function messen(plan, jahre, ab, bereiche) {
+  const iv = plan._intern.intervalle;
+  const je = jahre.map((j) => {
+    const n = bilanz(iv, Z.parse(j.von), Z.parse(j.bis)).naechte;
+    return { jahr: j.jahr, papa: n.papa, mama: n.mama, abw: Math.abs(n.papa - n.mama) / 2 };
+  });
+  // Sommer ist wegen Hortwoche und Sonderbetreuung ohnehin lang und zählt nicht; Blöcke über Weihnachten/Neujahr werden markiert.
+  const lang = bloecke(iv, ab)
+    .filter((b) => (b.bis - b.von) / TAG > LANG_TAGE && !bereiche.sommer.some((x) => b.von < x.bis && x.von < b.bis))
+    .map((b) => ({
+      von: Z.format(b.von), bis: Z.format(b.bis), bei: b.bei, tage: Math.round(((b.bis - b.von) / TAG) * 10) / 10,
+      weihnachten: bereiche.weihnachten.some((x) => b.von < x.bis && x.von < b.bis),
+    }));
+  // Künstliche Ausgleichswochen: zusammenhängende Ausgleichsblöcke des Werktagstauschs (Regel 4)
+  let ausgleich = 0;
+  let davor = false;
+  for (const x of iv) {
+    if (x.bis <= ab) continue;
+    const ist = /^Ausgleich/.test(x.grund ?? '');
+    if (ist && !davor) ausgleich++;
+    davor = ist;
+  }
+  return { jahre: je, lang, ausgleich };
+}
+
+/**
+ * @param {object} e
+ * @param {object[]} e.regeln  alle Regelversionen
+ * @param {object[]} e.ferien
+ * @param {object[]} e.antraege
+ * @param {number} e.jetzt     Minutenwert; Stichtage liegen danach
+ * @returns {{ basis, kandidaten: object[], vorschlaege: object[] }}
+ */
+function rhythmusAnalyse({ regeln, ferien, antraege = [], jetzt }) {
+  const versionen = [...regeln].sort((a, b) => (a.gueltigAb < b.gueltigAb ? -1 : 1));
+  const letzte = versionen.at(-1);
+  const horizont = ferienAbgedecktBis(versionen, ferien);
+  const leer = { basis: null, kandidaten: [], vorschlaege: [], pruefe: () => null };
+  if (horizont === null) return leer;
+  const planVon = Z.parse(versionen[0].planbeginn);
+  const zeitraum = { von: Z.format(planVon), bis: Z.format(horizont) };
+  const jahre = betreuungsjahre(versionen, ferien).filter((j) => Z.parse(j.bis) <= horizont);
+  const basisPlan = berechnePlan({ regeln: versionen, ferien, antraege, zeitraum });
+
+  // Kandidaten: der erste Rhythmus-Wechselzeitpunkt nach jedem Ferienende (Schulbeginn), in der Zukunft, nach der letzten Regelversion
+  const r = letzte.rhythmus;
+  const ref = Z.parse(r.referenzBeginn);
+  const zyklus = r.zyklusTage * TAG;
+  const startZeiten = new Set();
+  for (const f of ferien) {
+    const b = schulbeginnTag(f);
+    const s = ref + Math.ceil((b - ref) / zyklus) * zyklus;
+    if (s > jetzt && s >= Z.parse(letzte.gueltigAb) && s < horizont) startZeiten.add(s);
+  }
+  const bereich = (art) => ferien.filter((f) => f.art === art).map((f) => ({ von: Z.parse(f.erster), bis: schulbeginnTag(f) }));
+  const bereiche = { sommer: bereich('sommer'), weihnachten: bereich('weihnachten') };
+  const basis = messen(basisPlan, jahre, jetzt, bereiche);
+
+  const bewerte = (s) => {
+    const neu = { ...letzte, rhythmus: { ...r, referenzBei: anderer(r.referenzBei) }, gueltigAb: Z.format(s) };
+    const plan = berechnePlan({ regeln: [...versionen, neu], ferien, antraege, zeitraum });
+    const m = messen(plan, jahre, s, bereiche);
+    const betroffen = m.jahre.filter((j) => Z.parse(jahre.find((x) => x.jahr === j.jahr).bis) > s);
+    const basisJahre = basis.jahre.filter((j) => betroffen.some((b) => b.jahr === j.jahr));
+    const verteilungOk = betroffen.every((j) => j.abw <= Math.max(TOLERANZ_NAECHTE, basisJahre.find((b) => b.jahr === j.jahr).abw));
+    const langVorher = basis.lang.filter((b) => Z.parse(b.bis) > s);
+    const lang = m.lang;
+    const weihVorher = langVorher.filter((b) => b.weihnachten).length;
+    const weih = lang.filter((b) => b.weihnachten).length;
+    const summeAbw = betroffen.reduce((a, j) => a + j.abw, 0);
+    const summeAbwVorher = basisJahre.reduce((a, j) => a + j.abw, 0);
+    const ausgleichVorher = messen(basisPlan, jahre, s, bereiche).ausgleich;
+    return {
+      stichtag: Z.format(s),
+      parameter: { rhythmus: { referenzBei: anderer(r.referenzBei) } },
+      jahre: betroffen.map((j) => ({ ...j, vorher: basisJahre.find((b) => b.jahr === j.jahr) })),
+      langVorher, lang,
+      weniger: langVorher.length - lang.length,
+      weihnachtenVorher: weihVorher, weihnachten: weih,
+      ausgleichVorher, ausgleich: m.ausgleich,
+      summeAbw, summeAbwVorher,
+      verteilungOk,
+      besser: verteilungOk && (weih < weihVorher || m.ausgleich < ausgleichVorher || lang.length < langVorher.length
+        || (lang.length === langVorher.length && summeAbw <= summeAbwVorher - 1)),
+    };
+  };
+  const kandidaten = [...startZeiten].sort((a, b) => a - b).map(bewerte);
+  const vorschlaege = kandidaten.filter((k) => k.besser)
+    .sort((a, b) => (a.weihnachten - a.weihnachtenVorher) - (b.weihnachten - b.weihnachtenVorher)
+      || (a.ausgleich - a.ausgleichVorher) - (b.ausgleich - b.ausgleichVorher)
+      || (a.lang.length - a.langVorher.length) - (b.lang.length - b.langVorher.length)
+      || a.summeAbw - b.summeAbw || (a.stichtag < b.stichtag ? -1 : 1));
+  /** Bewertet einen frei gewählten Wechsel: der erste Rhythmus-Wechselzeitpunkt ab `datum` (YYYY-MM-DD). null, wenn nicht möglich. */
+  const pruefe = (datum) => {
+    const t = Z.tag(Z.parse(datum));
+    const s = ref + Math.ceil((t - ref) / zyklus) * zyklus;
+    if (s <= jetzt || s < Z.parse(letzte.gueltigAb) || s >= horizont) return null;
+    return kandidaten.find((k) => k.stichtag === Z.format(s)) ?? bewerte(s);
+  };
+  return { basis, kandidaten, vorschlaege, pruefe };
+}
+
+return { TOLERANZ_NAECHTE, LANG_TAGE, bloecke, rhythmusAnalyse };
+};
 __f['ui/daten.js'] = function () {
 // Lädt alle Eingaben aus dem Dienst und berechnet daraus Plan, Rhythmus und Hilfsstrukturen für die Ansichten.
 
@@ -2142,6 +2316,7 @@ const { berechnePlan, ferienAbgedecktBis, betreuungsjahre, bilanz } = __r('engin
 const { kennzahlen, leereBilanz } = __r('engine/statistik.js');
 const { feiertage } = __r('ui/util.js');
 const { aktiveVorkommen } = __r('app/serie.js');
+const { rhythmusAnalyse } = __r('app/rhythmus.js');
 
 async function ladeDaten(dienst, jetzt) {
   const ich = await dienst.ich();
@@ -2151,7 +2326,8 @@ async function ladeDaten(dienst, jetzt) {
   const ferien = await dienst.ferien();
   const termine = await dienst.termine();
   const verlauf = await dienst.verlauf();
-  const d = { ich, rollen, antraege, regeln, ferien, termine, verlauf, jetzt };
+  const geraete = await dienst.geraete().catch(() => null); // vor Veröffentlichung der neuen Regeln nicht lesbar
+  const d = { ich, rollen, antraege, regeln, ferien, termine, verlauf, geraete, jetzt };
   rechne(d);
   return d;
 }
@@ -2176,6 +2352,11 @@ function rechne(d) {
   }
 
   d.vorkommen = aktiveVorkommen(d.termine);
+  try {
+    d.rhythmusAnalyse = rhythmusAnalyse({ regeln: d.regeln, ferien: d.ferien, antraege: d.antraege, jetzt: d.jetzt });
+  } catch {
+    d.rhythmusAnalyse = null; // Vorschläge sind nur ein Zusatz; ein Rechenfehler darf die App nicht blockieren
+  }
   d.offen = d.antraege.filter((a) => a.status === 'offen');
   d.offenBereiche = [];
   for (const a of d.offen) {
@@ -2388,6 +2569,119 @@ function jahrSeite(d, state) {
 
 return { FERIEN_NAMEN, legendeHtml, monatGitter, monatHinweise, kalenderSeite, jahrMonate, jahrChips, jahrSeite };
 };
+__f['ui/rhythmus.js'] = function () {
+// Rhythmus-Assistent: Vorschläge für einen Rhythmuswechsel (Berechnung in src/app/rhythmus.js).
+
+const Z = __r('engine/zeit.js');
+const { anderer } = __r('engine/engine.js');
+const { TOLERANZ_NAECHTE, LANG_TAGE } = __r('app/rhythmus.js');
+const { app, zeigeModal, schliesseModal, felder, fange, meldung } = __r('ui/ctx.js');
+const { NAME, esc, datumDE, wt, uhr } = __r('ui/util.js');
+const { ivAt } = __r('ui/daten.js');
+
+const wtDatumUhr = (z) => `${wt(z)} ${datumDE(z.slice(0, 10))} ${uhr(z)} Uhr`;
+const tage = (b) => `${datumDE(b.von.slice(0, 10))} – ${datumDE(b.bis.slice(0, 10))}`;
+const blockZeile = (b) => `<li><span class="wer ${b.bei}">${NAME[b.bei]}</span> ${esc(tage(b))} · ${String(b.tage).replace('.', ',')} Tage${b.weihnachten ? ' · <b>Weihnachten/Neujahr</b>' : ''}</li>`;
+
+function wirkung(d, k) {
+  const s = Z.parse(k.stichtag);
+  const bleibt = ivAt(d, s - 1)?.bei;
+  const jahre = k.jahre.map((j) => `${j.jahr}: Papa ${j.papa} / Mama ${j.mama}${j.vorher && (j.vorher.papa !== j.papa) ? ` (vorher ${j.vorher.papa} / ${j.vorher.mama})` : ''}`).join(' · ');
+  const davor = bleibt ? `Am ${esc(wtDatumUhr(k.stichtag))} bleibt Lotte eine Woche länger bei <b>${NAME[bleibt]}</b>; danach` : 'Danach';
+  return `<p>${davor} läuft der Rhythmus andersherum weiter. Das ist eine ganz normale Regeländerung, die ${esc(NAME[anderer(d.ich.rolle)])} bestätigen muss.</p>
+    <ul class="zeilen">
+      <li><b>Weihnachten/Neujahr:</b> Blöcke über ${LANG_TAGE} Tage am Stück ${k.weihnachtenVorher} → ${k.weihnachten}</li>
+      <li><b>Künstliche Ausgleichswochen</b> (Werktagstausch bei Frühjahr/Herbst): ${k.ausgleichVorher} → ${k.ausgleich}</li>
+      <li><b>Alle langen Blöcke</b> (ohne Sommer): ${k.langVorher.length} → ${k.lang.length}</li>
+      <li><b>Nächte je Betreuungsjahr:</b> ${esc(jahre)}</li>
+    </ul>
+    ${k.lang.length ? `<details class="aufklapp"><summary>Lange Blöcke danach (${k.lang.length})</summary><ul class="zeilen">${k.lang.map(blockZeile).join('')}</ul></details>` : ''}`;
+}
+
+function karte(d, k, empfohlen) {
+  return `<article class="karte">
+    <header><h3>Wechsel ab ${esc(wtDatumUhr(k.stichtag))}</h3>${empfohlen ? '<span class="status st-bestaetigt">Vorschlag</span>' : (k.verteilungOk ? '' : '<span class="status st-abgelehnt">Verteilung außerhalb</span>')}</header>
+    ${wirkung(d, k)}
+    <div class="aktionen"><button class="knopf${empfohlen ? ' primaer' : ''}" data-act="rhythmusAntrag" data-stichtag="${esc(k.stichtag)}">Als Regeländerung beantragen …</button></div>
+  </article>`;
+}
+
+function rhythmusSeite(d) {
+  const a = d.rhythmusAnalyse;
+  if (!a?.basis) return '<h2>Rhythmus-Assistent</h2><p class="leer">Ohne hinterlegte Ferientermine lässt sich nichts berechnen.</p>';
+  const offen = d.offen.some((x) => x.art === 'regelaenderung');
+  const top = a.vorschlaege.slice(0, 3);
+  const eigen = app.state.rhythmusEigen ?? null;
+  const rest = a.kandidaten.filter((k) => !top.includes(k) && k !== eigen);
+  return `<h2>Rhythmus-Assistent</h2>
+    <p class="klein">Die Weihnachtsregel bleibt, wie sie ist. Ein <b>Rhythmuswechsel</b> dreht den festen Freitagswechsel einmalig von „gerade“ auf „ungerade“ (oder umgekehrt): Lotte bleibt eine Woche länger, danach läuft der Rhythmus andersherum. Das legt fest, wer die Woche vor Weihnachten und die Ferienwochen bekommt, und kann künstliche Ausgleichswochen und Doppelwochen vermeiden. Die App rechnet jeden Wechsel nach Ferienende bis zum Ende der hinterlegten Ferientermine durch und schlägt nur vor, was Doppelwochen über Weihnachten, Ausgleichswochen oder lange Blöcke (über ${LANG_TAGE} Tage) verringert und die Nächte je Betreuungsjahr nahe an der Hälfte hält (höchstens ${TOLERANZ_NAECHTE} Nächte Abweichung vom Mittel, oder nicht schlechter als heute). Ob ein Vorschlag beantragt wird, entscheidet ihr; ihr könnt auch ohne Vorschlag einen eigenen Wechsel prüfen und beantragen.</p>
+    ${offen ? '<p class="hinweis warn">Es ist bereits eine Regeländerung offen. Erst diese entscheiden, dann ein weiterer Wechsel.</p>' : ''}
+    <h3>Heute: lange Blöcke ab jetzt (ohne Sommer)</h3>
+    ${a.basis.lang.length ? `<ul class="zeilen">${a.basis.lang.map(blockZeile).join('')}</ul>` : '<p class="leer">Keine.</p>'}
+    <h3>${top.length ? 'Vorschläge' : 'Kein Vorschlag'}</h3>
+    ${top.length ? top.map((k) => karte(d, k, true)).join('') : '<p class="leer">Kein Wechsel verbessert den Plan, ohne die Jahresverteilung zu verschlechtern.</p>'}
+    <h3>Eigenen Wechsel prüfen</h3>
+    <div class="zeile"><input type="date" id="rhythmusDatum" aria-label="Wechsel ab Datum" value="${esc(eigen ? eigen.stichtag.slice(0, 10) : Z.formatDatum(Z.plusTage(Z.tag(d.jetzt), 14)))}">
+      <button class="knopf" data-act="rhythmusPruefen">Prüfen</button></div>
+    <p class="klein">Der Wechsel gilt ab dem ersten Freitag-Wechselzeitpunkt (15:00) an oder nach diesem Datum.</p>
+    ${eigen ? karte(d, eigen, false) : ''}
+    ${rest.length ? `<details class="aufklapp"><summary>Alle weiteren geprüften Wechsel (${rest.length})</summary>${rest.map((k) => karte(d, k, false)).join('')}</details>` : ''}`;
+}
+
+/** Hinweis für die Startseite, nur bei einem Vorschlag und ohne offene Regeländerung. */
+function rhythmusHinweis(d) {
+  const k = d.rhythmusAnalyse?.vorschlaege?.[0];
+  if (!k || d.offen.some((x) => x.art === 'regelaenderung')) return '';
+  const weih = k.weihnachtenVorher > k.weihnachten ? ` Weniger Doppelwochen über Weihnachten/Neujahr (${k.weihnachtenVorher} → ${k.weihnachten}).`
+    : k.ausgleichVorher > k.ausgleich ? ` Weniger Ausgleichswochen (${k.ausgleichVorher} → ${k.ausgleich}).` : ` Weniger lange Blöcke (${k.langVorher.length} → ${k.lang.length}).`;
+  return `<p class="hinweis"><b>Rhythmus-Vorschlag:</b> Wechsel ab ${esc(wtDatumUhr(k.stichtag))}.${weih} <a href="#/rhythmus">Ansehen</a></p>`;
+}
+
+const finde = (stichtag) => app.d.rhythmusAnalyse.kandidaten.find((x) => x.stichtag === stichtag)
+  ?? (app.state.rhythmusEigen?.stichtag === stichtag ? app.state.rhythmusEigen : null);
+
+function rhythmusPruefen() {
+  const datum = document.getElementById('rhythmusDatum')?.value;
+  if (!datum) return meldung('Bitte ein Datum wählen', 'fehler');
+  const k = app.d.rhythmusAnalyse.pruefe(datum);
+  if (!k) return meldung('Für dieses Datum ist kein Wechsel möglich (liegt in der Vergangenheit, vor der letzten Regeländerung oder nach den hinterlegten Ferienterminen).', 'fehler');
+  app.state.rhythmusEigen = k;
+  app.zeichne();
+}
+
+function begruendung(k) {
+  const teile = [];
+  if (k.weihnachtenVorher > k.weihnachten) teile.push(`Doppelwochen über Weihnachten/Neujahr ${k.weihnachtenVorher} → ${k.weihnachten}`);
+  if (k.ausgleichVorher !== k.ausgleich) teile.push(`Ausgleichswochen ${k.ausgleichVorher} → ${k.ausgleich}`);
+  teile.push(`lange Blöcke ${k.langVorher.length} → ${k.lang.length}`);
+  teile.push(`Nächte: ${k.jahre.map((j) => `${j.jahr} Papa ${j.papa}/Mama ${j.mama}`).join(', ')}`);
+  return `Rhythmuswechsel (Phasenverschiebung um eine Woche): ${teile.join('; ')}.`;
+}
+
+function rhythmusAntragDialog(stichtag) {
+  const k = finde(stichtag);
+  zeigeModal(`<h2>Rhythmuswechsel beantragen</h2><div id="mfehler" class="fehler" role="alert" hidden></div>
+    <p><b>Ab ${esc(wtDatumUhr(stichtag))}</b> läuft der Wochenrhythmus andersherum (Regeländerung „Lotte ist ab dem Referenzzeitpunkt bei“).</p>
+    <label>Begründung<textarea data-f="begruendung" rows="4">${esc(begruendung(k))}</textarea></label>
+    <div class="aktionen"><button class="knopf" data-act="modalZu">Abbrechen</button><button class="knopf primaer" data-act="rhythmusSenden" data-stichtag="${esc(stichtag)}">Beantragen</button></div>`);
+}
+
+async function rhythmusSenden(el) {
+  const k = finde(el.dataset.stichtag);
+  const v = felder();
+  const ok = await fange(() => app.dienst.antragStellen({
+    art: 'regelaenderung', parameter: k.parameter, gueltigAb: k.stichtag, begruendung: v.begruendung,
+  }), { imModal: true });
+  if (!ok) return;
+  schliesseModal();
+  app.state.rhythmusEigen = null;
+  await app.neuLaden();
+  meldung('Rhythmuswechsel beantragt', 'ok');
+  location.hash = '#/antraege';
+}
+
+return { rhythmusSeite, rhythmusHinweis, rhythmusPruefen, rhythmusAntragDialog, rhythmusSenden };
+};
 __f['ui/start.js'] = function () {
 // Startseite: nächste Übergabe, offene Anträge, Saldo des Betreuungsjahres, darunter der aktuelle Monat.
 
@@ -2396,6 +2690,7 @@ const { naechsteUebergabe, saldoBetreuungsjahr } = __r('ui/daten.js');
 const { NAME, esc, wtDatumUhr, saldoText, datumDE, wtLang } = __r('ui/util.js');
 const { monatGitter, monatHinweise, legendeHtml } = __r('ui/kalender.js');
 const { monatsname } = __r('ui/util.js');
+const { rhythmusHinweis } = __r('ui/rhythmus.js');
 
 function inTagen(d, zeit) {
   const diff = Math.floor((Z.tag(Z.parse(zeit)) - Z.tag(d.jetzt)) / Z.MINUTEN_PRO_TAG);
@@ -2440,7 +2735,7 @@ function startSeite(d) {
         <p class="gross">${vorPlanbeginn ? 'Plan startet ' + datumDE(Z.format(d.planVon)) : esc(saldoText(k))}</p>
         <p class="klein">${vorPlanbeginn ? 'Noch keine Zeit gezählt' : `Papa ${k.naechte.papa} · Mama ${k.naechte.mama} Nächte · <a href="#/statistik">Statistik</a>`}</p></div>
     </section>
-    ${hinweis}${mamaHinweis}
+    ${hinweis}${mamaHinweis}${rhythmusHinweis(d)}
     <section aria-label="Monatskalender">
       <h2 class="monat"><a href="#/kalender/${jahr}-${String(monat).padStart(2, '0')}">${monatsname(jahr, monat)}</a></h2>
       ${monatGitter(d, jahr, monat)}
@@ -3537,7 +3832,7 @@ const { erstelleDienst, MELDUNG } = __r('app/dienst.js');
 const { erstelleLocalStorageSpeicher } = __r('speicher/localstorage.js');
 const { DEV_KONTEN } = __r('speicher/inmemory.js');
 const { erstelleFirebaseSpeicher } = __r('speicher/firebase.js');
-const { FIREBASE_CONFIG, PAPA_EMAIL } = __r('data/firebase-config.js');
+const { FIREBASE_CONFIG, PAPA_EMAIL, VAPID_KEY } = __r('data/firebase-config.js');
 const { app, meldung, zeigeModal, schliesseModal, fange, modalFehler } = __r('ui/ctx.js');
 const { ladeDaten, betreuungsjahrZu } = __r('ui/daten.js');
 const { esc, NAME, download, datumDE } = __r('ui/util.js');
@@ -3548,6 +3843,7 @@ const {
 } = __r('ui/listen.js');
 const { statistikSeite } = __r('ui/statistik-ansicht.js');
 const { termineSeite } = __r('ui/termine.js');
+const { rhythmusSeite, rhythmusAntragDialog, rhythmusSenden, rhythmusPruefen } = __r('ui/rhythmus.js');
 const { betreuungsBloecke, betreuungsIcs, termineIcs } = __r('app/ics.js');
 const { druckMonat, druckJahr, druckVerlauf } = __r('ui/druck.js');
 const {
@@ -3641,7 +3937,7 @@ const TABS = [
   ['kalender', 'Kalender', '▦', ['kalender', 'jahr']],
   ['antraege', 'Anträge', '✎', ['antraege']],
   ['statistik', 'Statistik', '▤', ['statistik']],
-  ['mehr', 'Mehr', '☰', ['mehr', 'uebergaben', 'termine', 'regeln', 'ferien', 'verlauf', 'export']],
+  ['mehr', 'Mehr', '☰', ['mehr', 'uebergaben', 'termine', 'regeln', 'rhythmus', 'ferien', 'verlauf', 'export']],
 ];
 
 function zeichne() {
@@ -3671,6 +3967,7 @@ function zeichne() {
     case 'uebergaben': st.jahr = jahrAusRoute(r.a); inhalt = uebergabenSeite(d, st); break;
     case 'termine': inhalt = termineSeite(d); break;
     case 'regeln': inhalt = regelnSeite(d); break;
+    case 'rhythmus': inhalt = rhythmusSeite(d); break;
     case 'ferien': inhalt = ferienSeite(d); break;
     case 'verlauf': inhalt = verlaufSeite(d); break;
     case 'export': inhalt = exportSeite(d); break;
@@ -3726,6 +4023,17 @@ function installKarte() {
     ${installEreignis ? '<div class="aktionen"><button class="knopf primaer" data-act="appInstallieren">App installieren</button></div>' : ''}</div>`;
 }
 
+function benachrichtigungKarte(d) {
+  if (!app.speicher.pushToken || !VAPID_KEY) return '';
+  const g = d.geraete;
+  if (!g) return '<h3>Benachrichtigungen</h3><p class="klein">Noch nicht freigeschaltet (neue Regeln in Firebase fehlen).</p>';
+  const geraetAn = typeof Notification !== 'undefined' && Notification.permission === 'granted' && g.tokens.length > 0;
+  return `<h3>Benachrichtigungen</h3>
+    <p class="klein">Bei Anträgen, Antworten und Terminen des anderen Elternteils: Push-Nachricht aufs Handy und E-Mail. ${g.tokens.length ? `${g.tokens.length} Gerät(e) angemeldet.` : 'Noch kein Gerät angemeldet.'}</p>
+    <div class="aktionen"><button class="knopf${geraetAn ? '' : ' primaer'}" data-act="pushAn">${geraetAn ? 'Dieses Gerät erneut anmelden' : 'Auf diesem Gerät aktivieren'}</button>
+    <button class="knopf" data-act="mailUmschalten">E-Mail: ${g.mail === false ? 'aus (einschalten)' : 'an (ausschalten)'}</button></div>`;
+}
+
 function mehrSeite(d) {
   const theme = document.documentElement.dataset.theme ?? '';
   return `<h2>Mehr</h2>${installKarte()}
@@ -3733,6 +4041,7 @@ function mehrSeite(d) {
       <li><a href="#/termine"><span class="sym" aria-hidden="true">📅</span>Termine Lotte</a></li>
       <li><a href="#/uebergaben"><span class="sym" aria-hidden="true">🔁</span>Übergaben</a></li>
       <li><a href="#/regeln"><span class="sym" aria-hidden="true">📋</span>Regeln</a></li>
+      <li><a href="#/rhythmus"><span class="sym" aria-hidden="true">🔄</span>Rhythmus-Assistent</a></li>
       <li><a href="#/ferien"><span class="sym" aria-hidden="true">🏖️</span>Ferientermine</a></li>
       <li><a href="#/verlauf"><span class="sym" aria-hidden="true">🕘</span>Verlauf</a></li>
       <li><a href="#/export"><span class="sym" aria-hidden="true">💾</span>Export und Sicherung</a></li>
@@ -3740,6 +4049,7 @@ function mehrSeite(d) {
     </ul>
     <h3>Darstellung</h3>
     <div class="chips">${[['', 'Automatisch'], ['light', 'Hell'], ['dark', 'Dunkel']].map(([v, t]) => `<button class="chip${theme === v ? ' aktiv' : ''}" data-act="theme" data-theme="${v}">${t}</button>`).join('')}</div>
+    ${benachrichtigungKarte(d)}
     ${app.speicher.abmelden ? `<h3>Konto</h3><p class="klein">Angemeldet als ${esc(app.speicher.email?.() ?? '')} (${d.ich.rolle === 'papa' ? 'Papa' : 'Mama'}).</p>
       <div class="aktionen"><button class="knopf" data-act="abmelden">Abmelden</button></div>` : ''}
     ${app.dev ? `<h3>Entwicklungsmodus</h3>
@@ -3782,6 +4092,22 @@ const aktionen = {
   terminAbsagenDialog: (el) => terminAbsagenDialog(el.dataset.id, el.dataset.datum),
   terminAbsagenJa,
   terminAusfallJa,
+  rhythmusAntrag: (el) => rhythmusAntragDialog(el.dataset.stichtag),
+  rhythmusSenden,
+  rhythmusPruefen,
+  async pushAn() {
+    const ok = await fange(async () => {
+      const token = await app.speicher.pushToken(VAPID_KEY);
+      await app.dienst.geraeteSpeichern({ token });
+    });
+    if (!ok) return;
+    await neuLaden();
+    meldung('Benachrichtigungen sind auf diesem Gerät aktiv', 'ok');
+  },
+  async mailUmschalten() {
+    const ok = await fange(() => app.dienst.geraeteSpeichern({ mail: app.d.geraete?.mail === false }));
+    if (ok) await neuLaden();
+  },
   async appInstallieren() {
     if (!installEreignis) return;
     const e = installEreignis;
