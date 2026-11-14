@@ -263,7 +263,7 @@ label > .zeile { grid-template-columns: 1fr 6.5rem; }
 <div id="toast" role="status" hidden></div>
 <script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});</script>
 <noscript>Der Betreuungsplaner braucht JavaScript.</noscript>
-<!-- Build 14.11.2026 07:10 -->
+<!-- Build 14.11.2026 08:01 -->
 <script>
 const __m = {}; const __f = {};
 function __r(id) { if (!(id in __m)) __m[id] = __f[id](); return __m[id]; }
@@ -1709,11 +1709,17 @@ async function erstelleFirebaseSpeicher({
           await A.signInWithRedirect(auth, p);
           return;
         }
-        if (['auth/popup-closed-by-user', 'auth/cancelled-popup-request'].includes(e?.code)) return;
+        if (['auth/popup-closed-by-user', 'auth/cancelled-popup-request'].includes(e?.code)) {
+          // Auf Handys schließt sich das Fenster oft, bevor die Rückmeldung ankommt, obwohl die Anmeldung gelingt: kurz abwarten.
+          for (let i = 0; i < 20 && !auth.currentUser; i++) await new Promise((r) => setTimeout(r, 150));
+          return;
+        }
         throw new SpeicherFehler(`Anmeldung fehlgeschlagen (${e?.code ?? e?.message})`);
       }
     },
     async abmelden() { await A.signOut(auth); },
+    /** Ruft f auf, sobald (auch verspätet) ein Konto angemeldet ist. */
+    beiAnmeldung(f) { return A.onAuthStateChanged(auth, (u) => { if (u) f(); }); },
 
     async aktuellerNutzer() {
       await bereitP;
@@ -3601,6 +3607,8 @@ async function start() {
       setzeRolle();
     }
   }
+  // Anmeldung kommt verspätet an (Popup/Weiterleitung): Plan sofort laden, ohne zweiten Anmeldeversuch
+  app.speicher.beiAnmeldung?.(() => { if (app.fehler === MELDUNG.NICHT_ANGEMELDET) neuLaden(); });
   window.addEventListener('hashchange', zeichne);
   document.addEventListener('click', klick);
   document.addEventListener('change', aenderung);
@@ -3820,7 +3828,11 @@ const aktionen = {
   },
   zuruecksetzenJa() { app.speicher.zuruecksetzen(); location.hash = '#/start'; location.reload(); },
   neuLaden: () => neuLaden(),
-  async anmelden() { await app.speicher.anmelden(); await neuLaden(); },
+  async anmelden() {
+    document.querySelectorAll('[data-act="anmelden"]').forEach((b) => { b.disabled = true; b.textContent = 'Anmeldung läuft …'; });
+    try { await app.speicher.anmelden(); } catch (e) { meldung(e.message, 'fehler'); }
+    await neuLaden();
+  },
   async abmelden() { await app.speicher.abmelden(); await neuLaden(); },
   async einrichten() {
     if (await fange(() => app.dienst.einrichten())) await neuLaden();
