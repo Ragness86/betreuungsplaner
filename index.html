@@ -68,17 +68,18 @@ header.kopf h1 { font-size: 1.05rem; margin: 0; }
 .rollenschalter { display: inline-flex; border: 1px solid var(--rand); border-radius: 8px; overflow: hidden; }
 .rollenschalter button { border: 0; background: transparent; color: var(--text); padding: 6px 10px; font: inherit; font-size: .85rem; min-height: 32px; }
 .rollenschalter button[aria-pressed="true"] { background: var(--akz); color: var(--akz-text); font-weight: 700; }
-main { max-width: 760px; margin: 0 auto; padding: 12px 12px 84px; }
+main { max-width: 760px; margin: 0 auto; padding: 12px 12px 96px; }
 nav.tabs {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; display: grid; grid-template-columns: repeat(5, 1fr);
   background: var(--karte); border-top: 1px solid var(--rand); padding-bottom: env(safe-area-inset-bottom);
 }
 nav.tabs a {
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; min-height: 52px;
-  text-decoration: none; color: var(--leise); font-size: .72rem; position: relative;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; min-height: 64px;
+  text-decoration: none; color: var(--leise); font-size: .82rem; position: relative;
 }
 nav.tabs a[aria-current="page"] { color: var(--akz); font-weight: 700; }
-nav.tabs .sym { font-size: 1.15rem; line-height: 1; }
+nav.tabs .sym { font-size: 1.6rem; line-height: 1; }
+nav.tabs a[aria-current="page"]::before { content: ''; position: absolute; top: 0; left: 25%; right: 25%; height: 3px; border-radius: 0 0 3px 3px; background: var(--akz); }
 nav.tabs .zaehler {
   position: absolute; top: 4px; left: calc(50% + 6px); min-width: 18px; padding: 0 5px; border-radius: 9px;
   background: var(--fehler); color: #fff; font-size: .68rem; text-align: center;
@@ -201,8 +202,10 @@ tfoot th, tfoot td { font-weight: 700; }
 details.aufklapp { margin-top: 12px; background: var(--karte); border: 1px solid var(--rand); border-radius: 10px; padding: 8px 10px; }
 details.aufklapp summary { cursor: pointer; font-weight: 700; min-height: 32px; }
 .regeltext li { margin-bottom: 8px; }
-.menue { list-style: none; padding: 0; }
+.menue { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 12px; }
 .menue li a { display: flex; align-items: center; justify-content: space-between; min-height: 52px; padding: 0 14px; margin-bottom: 6px; background: var(--karte); border: 1px solid var(--rand); border-radius: 10px; text-decoration: none; color: var(--text); font-weight: 600; }
+.menue li a { flex-direction: column; justify-content: center; gap: 6px; min-height: 96px; margin: 0; padding: 10px; text-align: center; }
+.menue .sym { font-size: 2rem; line-height: 1; }
 
 /* Dialoge */
 #modal .rahmen { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-end; justify-content: center; background: rgba(0, 0, 0, .5); }
@@ -253,7 +256,7 @@ label > .zeile { grid-template-columns: 1fr 6.5rem; }
 <div id="modal" hidden></div>
 <div id="toast" role="status" hidden></div>
 <noscript>Der Betreuungsplaner braucht JavaScript.</noscript>
-<!-- Build 14.11.2026 06:09 -->
+<!-- Build 14.11.2026 06:21 -->
 <script>
 const __m = {}; const __f = {};
 function __r(id) { if (!(id in __m)) __m[id] = __f[id](); return __m[id]; }
@@ -3472,13 +3475,13 @@ function mehrSeite(d) {
   const theme = document.documentElement.dataset.theme ?? '';
   return `<h2>Mehr</h2>
     <ul class="menue">
-      <li><a href="#/termine">Termine Lotte <span aria-hidden="true">›</span></a></li>
-      <li><a href="#/uebergaben">Übergaben <span aria-hidden="true">›</span></a></li>
-      <li><a href="#/regeln">Regeln <span aria-hidden="true">›</span></a></li>
-      <li><a href="#/ferien">Ferientermine <span aria-hidden="true">›</span></a></li>
-      <li><a href="#/verlauf">Verlauf <span aria-hidden="true">›</span></a></li>
-      <li><a href="#/export">Export und Sicherung <span aria-hidden="true">›</span></a></li>
-      <li><a href="#/jahr">Jahresübersicht <span aria-hidden="true">›</span></a></li>
+      <li><a href="#/termine"><span class="sym" aria-hidden="true">📅</span>Termine Lotte</a></li>
+      <li><a href="#/uebergaben"><span class="sym" aria-hidden="true">🔁</span>Übergaben</a></li>
+      <li><a href="#/regeln"><span class="sym" aria-hidden="true">📋</span>Regeln</a></li>
+      <li><a href="#/ferien"><span class="sym" aria-hidden="true">🏖️</span>Ferientermine</a></li>
+      <li><a href="#/verlauf"><span class="sym" aria-hidden="true">🕘</span>Verlauf</a></li>
+      <li><a href="#/export"><span class="sym" aria-hidden="true">💾</span>Export und Sicherung</a></li>
+      <li><a href="#/jahr"><span class="sym" aria-hidden="true">🗓️</span>Jahresübersicht</a></li>
     </ul>
     <h3>Darstellung</h3>
     <div class="chips">${[['', 'Automatisch'], ['light', 'Hell'], ['dark', 'Dunkel']].map(([v, t]) => `<button class="chip${theme === v ? ' aktiv' : ''}" data-act="theme" data-theme="${v}">${t}</button>`).join('')}</div>
