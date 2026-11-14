@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light dark">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#1c2e63">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
 <title>Betreuungsplaner Lotte</title>
 <style>
 :root {
@@ -255,8 +261,9 @@ label > .zeile { grid-template-columns: 1fr 6.5rem; }
 <div id="app" aria-live="polite"><p class="laden">Betreuungsplaner wird geladen …</p></div>
 <div id="modal" hidden></div>
 <div id="toast" role="status" hidden></div>
+<script>if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(function () {});</script>
 <noscript>Der Betreuungsplaner braucht JavaScript.</noscript>
-<!-- Build 14.11.2026 06:21 -->
+<!-- Build 14.11.2026 06:35 -->
 <script>
 const __m = {}; const __f = {};
 function __r(id) { if (!(id in __m)) __m[id] = __f[id](); return __m[id]; }
